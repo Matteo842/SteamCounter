@@ -9,6 +9,7 @@ use anyhow::{Result, bail};
 use chrono::NaiveDate;
 use clap::Parser;
 use serde::Serialize;
+use steamcounter::cache::{CacheState, HistoryCache, Settings};
 use steamcounter::history::{
     HistorySnapshot, MonthlyAverage, SampleAverage, SteamChartsClient, YearAverage, parse_month,
 };
@@ -18,37 +19,43 @@ use steamcounter::{Game, GameQuery, NameMatch, PlayerSnapshot, SteamClient, matc
 #[command(
     name = "steamcounter",
     version,
-    about = "Mostra i giocatori attivi adesso su Steam. Nessuna chiave API richiesta.",
-    after_help = "Esempi:\n  steamcounter 730\n  steamcounter elden ring --stats\n  steamcounter 730 --month 2026-08 --year 2025\n  steamcounter \"Counter-Strike 2\" --stats --json\n  steamcounter --search portal\n\nUsa l'AppID del gioco, non lo SteamID di un utente."
+    about = "Show current Steam player counts. No API key required.",
+    after_help = "Examples:\n  steamcounter 730\n  steamcounter elden ring --stats\n  steamcounter 730 --month 2026-08 --year 2025\n  steamcounter \"Counter-Strike 2\" --stats --json\n  steamcounter --search portal\n\nUse the game's AppID, not a user's SteamID."
 )]
 struct Cli {
-    /// Nome del gioco oppure AppID Steam
-    #[arg(required = true, num_args = 1.., value_name = "GIOCO")]
+    /// Game name or Steam AppID
+    #[arg(required = true, num_args = 1.., value_name = "GAME")]
     game: Vec<String>,
 
-    /// Elenca i risultati dello Store e i loro AppID, senza leggere il contatore
+    /// List Store results and AppIDs without requesting player counts
     #[arg(long)]
     search: bool,
 
-    /// Stampa JSON, utile per script e future raccolte dati
+    /// Print JSON for use in scripts
     #[arg(long)]
     json: bool,
 
-    /// Aggiunge medie e storico da SteamCharts, scaricati solo su richiesta
+    /// Add SteamCharts averages and history, fetched on demand
     #[arg(long, conflicts_with = "search")]
     stats: bool,
 
-    /// Media pubblicata di un mese completato, formato YYYY-MM (include --stats)
+    /// Published average for a completed month, YYYY-MM (includes --stats)
     #[arg(long, value_name = "YYYY-MM", value_parser = parse_month, conflicts_with = "search")]
     month: Option<NaiveDate>,
 
-    /// Stima annuale dai 12 mesi pubblicati (include --stats)
+    /// Yearly estimate from 12 published months (includes --stats)
     #[arg(long, value_name = "YYYY", value_parser = clap::value_parser!(i32).range(2012..=9998), conflicts_with = "search")]
     year: Option<i32>,
 
-    /// Timeout massimo di ciascuna richiesta, in secondi (1-120)
+    /// Maximum timeout for each request, in seconds (1-120)
     #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(1..=120))]
     timeout: u64,
+    /// Reuse local history for one hour (overrides the GUI setting for this run)
+    #[arg(long, conflicts_with = "no_cache")]
+    cache: bool,
+    /// Skip local history storage for this run
+    #[arg(long)]
+    no_cache: bool,
 }
 
 fn main() -> ExitCode {
@@ -61,7 +68,7 @@ fn main() -> ExitCode {
             {
                 return ExitCode::SUCCESS;
             }
-            eprintln!("Errore: {error:#}");
+            eprintln!("Error: {error:#}");
             ExitCode::FAILURE
         }
     }
@@ -72,7 +79,7 @@ fn run(cli: Cli) -> Result<()> {
     // Valida prima di inizializzare la rete; --search consente anche titoli numerici.
     let query = if cli.search {
         if input.trim().is_empty() {
-            bail!("Inserisci un nome da cercare.");
+            bail!("Enter a name to search.");
         }
         GameQuery::Name(input.trim().to_owned())
     } else {
@@ -88,11 +95,11 @@ fn run(cli: Cli) -> Result<()> {
         } else if games.is_empty() {
             writeln!(
                 output,
-                "Nessun risultato per \"{input}\". Prova un altro nome oppure l'AppID."
+                "No results for \"{input}\". Try another name or the AppID."
             )?;
         } else {
             writeln!(output, "{}", format_games(&games))?;
-            writeln!(output, "\nPer il contatore: steamcounter <APPID>")?;
+            writeln!(output, "\nFor player counts: steamcounter <APPID>")?;
         }
         return Ok(());
     }
@@ -101,11 +108,11 @@ fn run(cli: Cli) -> Result<()> {
         GameQuery::AppId(appid) => (appid, None),
         GameQuery::Name(name) => match match_name(&name, steam.search(&name)?) {
             NameMatch::Found(game) => (game.appid, Some(game.name)),
-            NameMatch::NotFound => bail!(
-                "Nessun risultato per \"{name}\". Prova il nome completo oppure l'AppID del gioco."
-            ),
+            NameMatch::NotFound => {
+                bail!("No results for \"{name}\". Try the full game name or its AppID.")
+            }
             NameMatch::Ambiguous(games) => bail!(
-                "Piu risultati per \"{name}\":\n\n{}\n\nScegli il gioco usando: steamcounter <APPID>",
+                "Multiple results for \"{name}\":\n\n{}\n\nChoose a game using: steamcounter <APPID>",
                 format_games(&games)
             ),
         },
@@ -149,25 +156,39 @@ fn show_stats(
     };
     match steam.snapshot(appid, name) {
         Ok(current) => report.current = Some(current),
-        Err(error) => report.warnings.push(format!(
-            "Conteggio Steam attuale non disponibile: {error:#}"
-        )),
+        Err(error) => report
+            .warnings
+            .push(format!("Current Steam count unavailable: {error:#}")),
     }
+    let enabled = if cli.no_cache {
+        false
+    } else if cli.cache {
+        true
+    } else {
+        match Settings::load() {
+            Ok(settings) => settings.cache_enabled,
+            Err(error) => {
+                report.warnings.push(format!("{error:#}"));
+                false
+            }
+        }
+    };
+    let cache = HistoryCache::new(enabled)?;
     match SteamChartsClient::new(Duration::from_secs(cli.timeout))
-        .and_then(|client| client.history(appid))
+        .and_then(|client| client.history_cached(appid, &cache))
     {
         Ok(history) => {
             if let Some(month) = cli.month {
                 report.selected_month = history.month(month).cloned();
                 if report.selected_month.is_none() {
-                    report.warnings.push(format!("Media pubblicata per {} non disponibile. Per il mese in corso consulta la stima e la sua copertura.", month.format("%Y-%m")));
+                    report.warnings.push(format!("Published average for {} unavailable. For this month, see the estimate and its coverage.", month.format("%Y-%m")));
                 }
             }
             if let Some(year) = cli.year {
                 let average = history.year(year);
                 if average.average_players.is_none() {
                     report.warnings.push(format!(
-                        "Media annuale {year} non disponibile: presenti {}/12 mesi completati.",
+                        "Yearly average for {year} unavailable: {}/12 completed months available.",
                         average.months_available
                     ));
                 }
@@ -176,12 +197,12 @@ fn show_stats(
             report.warnings.extend(history.warnings.iter().cloned());
             report.history = Some(history);
         }
-        Err(error) => report.warnings.push(format!(
-            "Statistiche SteamCharts non disponibili: {error:#}"
-        )),
+        Err(error) => report
+            .warnings
+            .push(format!("SteamCharts statistics unavailable: {error:#}")),
     }
     if report.current.is_none() && report.history.is_none() {
-        bail!("Nessuna fonte disponibile. {}", report.warnings.join("\n"));
+        bail!("No data source available. {}", report.warnings.join("\n"));
     }
     if cli.json {
         writeln!(output, "{}", serde_json::to_string_pretty(&report)?)?;
@@ -190,23 +211,23 @@ fn show_stats(
     if let Some(current) = &report.current {
         write_current(output, current)?;
     } else {
-        writeln!(output, "AppID: {appid}\nGiocatori attivi: non disponibili")?;
+        writeln!(output, "AppID: {appid}\nCurrent players: unavailable")?;
     }
     if let Some(history) = &report.history {
-        writeln!(output, "\nMedie dei giocatori contemporanei - SteamCharts")?;
-        write_estimate(output, "Oggi (UTC, fino alla lettura)", &history.today)?;
-        write_estimate(output, "Ultimi 7 giorni", &history.last_7_days)?;
+        writeln!(output, "\nAverage concurrent players - SteamCharts")?;
+        write_estimate(output, "Today (UTC, as of this request)", &history.today)?;
+        write_estimate(output, "Last 7 days", &history.last_7_days)?;
         write_estimate(
             output,
             &format!(
-                "Mese in corso ({})",
+                "Current month ({})",
                 history.current_month.starts_at.format("%Y-%m")
             ),
             &history.current_month,
         )?;
         writeln!(
             output,
-            "Ultimi 30 giorni: {} (media pubblicata)",
+            "Last 30 days: {} (published average)",
             format_average(history.last_30_days.average_players)
         )?;
         if let Some(month) = report
@@ -216,7 +237,7 @@ fn show_stats(
         {
             writeln!(
                 output,
-                "Mese {}: {} (media pubblicata)",
+                "Month {}: {} (published average)",
                 month.month.format("%Y-%m"),
                 format_average(month.players.average_players)
             )?;
@@ -226,33 +247,45 @@ fn show_stats(
         {
             writeln!(
                 output,
-                "Anno {}: ~{} (stima ponderata dai 12 mesi)",
+                "Year {}: ~{} (weighted estimate from 12 months)",
                 year.year,
                 format_average(average)
             )?;
         }
         writeln!(
             output,
-            "\n~ = stima sui dati disponibili; la copertura esclude intervalli mancanti."
+            "\n~ = estimate from available data; coverage excludes missing intervals."
         )?;
         if let Some(at) = history.latest_sample_at {
             writeln!(
                 output,
-                "Ultimo campione orario (UTC): {}",
+                "Latest hourly sample (UTC): {}",
                 at.format("%Y-%m-%d %H:%M:%S")
             )?;
         }
         if let Some(at) = history.source_updated_at {
             writeln!(
                 output,
-                "Aggiornamento indicato dalla fonte (UTC): {}",
+                "Update reported by source (UTC): {}",
                 at.format("%Y-%m-%d %H:%M:%S")
             )?;
         }
-        writeln!(output, "Fonte: {}", history.source_url)?;
+        writeln!(output, "Source: {}", history.source_url)?;
+        if history.cache_state != CacheState::Network {
+            writeln!(
+                output,
+                "History: {} cache, fetched {} UTC",
+                if history.cache_state == CacheState::Stale {
+                    "stale"
+                } else {
+                    "fresh"
+                },
+                history.retrieved_at.format("%Y-%m-%d %H:%M")
+            )?;
+        }
     }
     for warning in report.warnings {
-        eprintln!("Avviso: {warning}");
+        eprintln!("Warning: {warning}");
     }
     Ok(())
 }
@@ -261,17 +294,17 @@ fn write_current(output: &mut impl Write, snapshot: &PlayerSnapshot) -> Result<(
     writeln!(
         output,
         "{}",
-        snapshot.name.as_deref().unwrap_or("Nome non disponibile")
+        snapshot.name.as_deref().unwrap_or("Name unavailable")
     )?;
     writeln!(output, "AppID:           {}", snapshot.appid)?;
     writeln!(
         output,
-        "Giocatori attivi: {}",
+        "Current players: {}",
         format_count(snapshot.player_count)
     )?;
     writeln!(
         output,
-        "Rilevato (UTC):   {}",
+        "Checked (UTC):    {}",
         snapshot.checked_at.format("%Y-%m-%d %H:%M:%S")
     )?;
     Ok(())
@@ -281,16 +314,13 @@ fn write_estimate(output: &mut impl Write, label: &str, average: &SampleAverage)
     if let Some(value) = average.average_players {
         writeln!(
             output,
-            "{label}: ~{} (copertura {:.1}%, {} campioni)",
+            "{label}: ~{} ({:.1}% coverage, {} samples)",
             format_average(value),
             average.coverage_percent,
             average.sample_count
         )?;
     } else {
-        writeln!(
-            output,
-            "{label}: non disponibile (campioni orari insufficienti)"
-        )?;
+        writeln!(output, "{label}: unavailable (insufficient hourly samples)")?;
     }
     Ok(())
 }
@@ -300,11 +330,11 @@ fn format_average(value: f64) -> String {
     let (integer, decimal) = number
         .split_once('.')
         .expect("media finita con due decimali");
-    format!("{},{decimal}", group_digits(integer))
+    format!("{}.{decimal}", group_digits(integer))
 }
 
 fn format_games(games: &[Game]) -> String {
-    let mut output = format!("{:<12} {}", "APPID", "TITOLO");
+    let mut output = format!("{:<12} {}", "APPID", "TITLE");
     for game in games {
         let _ = write!(output, "\n{:<12} {}", game.appid, game.name);
     }
@@ -320,7 +350,7 @@ fn group_digits(digits: &str) -> String {
     let mut formatted = String::new();
     for (index, digit) in digits.chars().enumerate() {
         if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            formatted.push('.');
+            formatted.push(',');
         }
         formatted.push(digit);
     }

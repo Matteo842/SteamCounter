@@ -12,6 +12,8 @@ use reqwest::blocking::Client;
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 
+use crate::cache::{CacheState, HistoryCache};
+
 const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MIN_SAMPLE_GAP_SECONDS: i64 = 30 * 60;
 const MAX_SAMPLE_GAP_SECONDS: i64 = 90 * 60;
@@ -63,6 +65,8 @@ pub struct HistorySnapshot {
     pub last_7_days: SampleAverage,
     pub current_month: SampleAverage,
     pub warnings: Vec<String>,
+    pub samples: Vec<Sample>,
+    pub cache_state: CacheState,
 }
 
 impl HistorySnapshot {
@@ -106,36 +110,98 @@ impl SteamChartsClient {
                 .user_agent(concat!(
                     "SteamCounter/",
                     env!("CARGO_PKG_VERSION"),
-                    " (personal CLI)"
+                    " (desktop and CLI; github.com/Matteo842/SteamCounter)"
                 ))
                 .timeout(timeout)
                 .connect_timeout(timeout.min(Duration::from_secs(10)))
                 .build()
-                .context("Impossibile inizializzare la connessione a SteamCharts")?,
+                .context("Could not initialize the SteamCharts connection")?,
             base_url: "https://steamcharts.com".to_owned(),
         })
     }
 
     pub fn history(&self, appid: NonZeroU32) -> Result<HistorySnapshot> {
+        self.history_cached(appid, &HistoryCache::disabled())
+    }
+
+    pub fn history_cached(
+        &self,
+        appid: NonZeroU32,
+        cache: &HistoryCache,
+    ) -> Result<HistorySnapshot> {
+        let response = cache.get_or_fetch(
+            appid,
+            |body, fetched| {
+                parse_page(&body.html, appid, fetched)?;
+                if let Some(json) = &body.chart {
+                    parse_samples(json, fetched)?;
+                }
+                Ok(())
+            },
+            || {
+                let url = format!("{}/app/{appid}", self.base_url);
+                let html = self.get(&url)?;
+                let fetched = Utc::now();
+                // Never replace a valid cache with an incompatible response.
+                parse_page(&html, appid, fetched)?;
+                let chart = self
+                    .get(&format!("{url}/chart-data.json"))
+                    .and_then(|json| {
+                        parse_samples(&json, fetched)?;
+                        Ok(json)
+                    });
+                Ok(crate::cache::HistoryBody {
+                    html,
+                    chart: chart.as_ref().ok().cloned(),
+                    retry_after: chart
+                        .as_ref()
+                        .err()
+                        .and_then(|error| error.downcast_ref::<crate::cache::RetryAfter>())
+                        .map(|error| error.at),
+                    chart_error: chart.err().map(|error| format!("{error:#}")),
+                })
+            },
+        )?;
+        let mut history =
+            self.decode_body(appid, &response.body, response.fetched_at, Utc::now())?;
+        history.cache_state = response.state;
+        history.warnings.extend(response.warnings);
+        Ok(history)
+    }
+
+    fn decode_body(
+        &self,
+        appid: NonZeroU32,
+        body: &crate::cache::HistoryBody,
+        fetched: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<HistorySnapshot> {
         let url = format!("{}/app/{appid}", self.base_url);
-        let html = self.get(&url)?;
-        let fetched = Utc::now();
-        let mut history = parse_page(&html, appid, fetched)?;
-        let chart = self
-            .get(&format!("{url}/chart-data.json"))
-            .and_then(|body| parse_samples(&body, fetched));
+        let mut history = parse_page(&body.html, appid, now)?;
+        history.source_url = url;
+        history.retrieved_at = fetched;
+        let chart = body
+            .chart
+            .as_ref()
+            .context(
+                body.chart_error
+                    .clone()
+                    .unwrap_or_else(|| "Hourly history unavailable".to_owned()),
+            )
+            .and_then(|json| parse_samples(json, fetched));
         match chart {
             Ok(points) => {
                 history.latest_sample_at = points.last().map(|point| point.at);
-                history.today = sample_average(&points, history.today.starts_at, fetched);
-                history.last_7_days = sample_average(&points, history.last_7_days.starts_at, fetched);
-                history.current_month = sample_average(&points, history.current_month.starts_at, fetched);
-                if points.last().is_none_or(|point| fetched - point.at > chrono::Duration::hours(3)) {
-                    history.warnings.push("I campioni orari sono assenti o risalgono a oltre tre ore fa.".to_owned());
+                history.today = sample_average(&points, history.today.starts_at, now);
+                history.last_7_days = sample_average(&points, history.last_7_days.starts_at, now);
+                history.current_month = sample_average(&points, history.current_month.starts_at, now);
+                if points.last().is_none_or(|point| now - point.at > chrono::Duration::hours(3)) {
+                    history.warnings.push("Hourly samples are missing or more than three hours old.".to_owned());
                 }
+                history.samples = points;
             }
             Err(error) => history.warnings.push(format!(
-                "Medie dai campioni orari non disponibili: {error:#}. Le medie mensili pubblicate restano consultabili."
+                "Hourly averages unavailable: {error:#}. Published monthly averages remain available."
             )),
         }
         Ok(history)
@@ -147,46 +213,74 @@ impl SteamChartsClient {
             .get(url)
             .send()
             .map_err(|error| anyhow::Error::new(error.without_url()))
-            .context("Connessione a SteamCharts non riuscita")?;
+            .context("Could not connect to SteamCharts")?;
+        if matches!(response.status().as_u16(), 429 | 503) {
+            let now = Utc::now();
+            let retry_at = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| {
+                    value
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|seconds| *seconds >= 0)
+                        .and_then(|seconds| chrono::Duration::try_seconds(seconds.min(366 * 86400)))
+                        .map(|delay| now + delay)
+                        .or_else(|| {
+                            DateTime::parse_from_rfc2822(value)
+                                .ok()
+                                .map(|date| date.with_timezone(&Utc))
+                        })
+                })
+                .unwrap_or(now + chrono::Duration::minutes(15));
+            return Err(crate::cache::RetryAfter {
+                at: retry_at,
+                message: format!(
+                    "SteamCharts requests a pause (HTTP {}).",
+                    response.status().as_u16()
+                ),
+            }
+            .into());
+        }
         match response.status().as_u16() {
-            403 => bail!("SteamCharts non consente questa richiesta (HTTP 403)"),
-            404 => bail!("SteamCharts non ha dati per questo gioco (HTTP 404)"),
-            429 => bail!("SteamCharts richiede di attendere prima di riprovare (HTTP 429)"),
+            403 => bail!("SteamCharts does not allow this request (HTTP 403)"),
+            404 => bail!("SteamCharts has no data for this game (HTTP 404)"),
             _ => (),
         }
         let response = response
             .error_for_status()
             .map_err(|error| anyhow::Error::new(error.without_url()))
-            .context("SteamCharts ha restituito un errore HTTP")?;
+            .context("SteamCharts returned an HTTP error")?;
         ensure!(
             response
                 .content_length()
                 .is_none_or(|len| len <= MAX_RESPONSE_BYTES),
-            "Risposta SteamCharts troppo grande (limite 2 MiB)"
+            "SteamCharts response is too large (2 MiB limit)"
         );
         let mut bytes = Vec::new();
         response
             .take(MAX_RESPONSE_BYTES + 1)
             .read_to_end(&mut bytes)
-            .context("Lettura della risposta SteamCharts non riuscita")?;
+            .context("Could not read the SteamCharts response")?;
         ensure!(
             bytes.len() as u64 <= MAX_RESPONSE_BYTES,
-            "Risposta SteamCharts troppo grande (limite 2 MiB)"
+            "SteamCharts response is too large (2 MiB limit)"
         );
-        String::from_utf8(bytes).context("Risposta SteamCharts non valida: atteso testo UTF-8")
+        String::from_utf8(bytes).context("Invalid SteamCharts response: expected UTF-8 text")
     }
 }
 
 pub fn parse_month(input: &str) -> Result<NaiveDate> {
     ensure!(
         input.len() == 7 && input.as_bytes()[4] == b'-',
-        "Usa un mese nel formato YYYY-MM, per esempio 2026-08"
+        "Use YYYY-MM for the month, for example 2026-08"
     );
     let date = NaiveDate::parse_from_str(&format!("{input}-01"), "%Y-%m-%d")
-        .context("Mese non valido: usa YYYY-MM")?;
+        .context("Invalid month: use YYYY-MM")?;
     ensure!(
         (2012..=9998).contains(&date.year()),
-        "L'anno deve essere compreso tra 2012 e 9998"
+        "Year must be between 2012 and 9998"
     );
     Ok(date)
 }
@@ -228,7 +322,7 @@ fn parse_page(html: &str, appid: NonZeroU32, now: DateTime<Utc>) -> Result<Histo
             let headers: Vec<_> = table.select(&header_selector).map(text).collect();
             headers == ["Month", "Avg. Players", "Gain", "% Gain", "Peak Players"]
         })
-        .context("Tabella delle medie SteamCharts assente o formato modificato")?;
+        .context("SteamCharts averages table is missing or its format changed")?;
     let mut last_30_days = None;
     let mut months = Vec::new();
     let mut seen_months = HashSet::new();
@@ -236,41 +330,41 @@ fn parse_page(html: &str, appid: NonZeroU32, now: DateTime<Utc>) -> Result<Histo
         let cells: Vec<_> = row.select(&selector("td")).map(text).collect();
         ensure!(
             cells.len() == 5,
-            "Riga SteamCharts incompleta o incompatibile"
+            "Incomplete or incompatible SteamCharts table row"
         );
         let average = cells[1]
             .parse::<f64>()
-            .context("Media SteamCharts non numerica")?;
+            .context("SteamCharts average is not numeric")?;
         ensure!(
             average.is_finite() && average >= 0.0,
-            "Media SteamCharts non valida"
+            "Invalid SteamCharts average"
         );
         let peak = cells[4]
             .parse::<u64>()
-            .context("Picco SteamCharts non numerico")?;
+            .context("SteamCharts peak is not numeric")?;
         ensure!(
             average <= peak as f64,
-            "Media SteamCharts superiore al picco: dati incompatibili"
+            "SteamCharts average exceeds the peak: incompatible data"
         );
         let players = PublishedAverage {
             average_players: average,
             peak_players: peak,
         };
         if cells[0] == "Last 30 Days" {
-            ensure!(last_30_days.is_none(), "Riga ultimi 30 giorni duplicata");
+            ensure!(last_30_days.is_none(), "Duplicate last-30-days row");
             last_30_days = Some(players);
         } else {
             let month = NaiveDate::parse_from_str(&format!("1 {}", cells[0]), "%d %B %Y")
-                .context("Etichetta del mese SteamCharts non riconosciuta")?;
+                .context("Unrecognized SteamCharts month label")?;
             ensure!(
                 month.year() >= 2012 && month.year() < 9999,
-                "Anno SteamCharts non valido"
+                "Invalid SteamCharts year"
             );
             ensure!(
                 next_month(month) <= now.date_naive(),
-                "SteamCharts contiene un mese non ancora completato"
+                "SteamCharts contains a month that has not finished"
             );
-            ensure!(seen_months.insert(month), "Mese SteamCharts duplicato");
+            ensure!(seen_months.insert(month), "Duplicate SteamCharts month");
             months.push(MonthlyAverage { month, players });
         }
     }
@@ -291,38 +385,39 @@ fn parse_page(html: &str, appid: NonZeroU32, now: DateTime<Utc>) -> Result<Histo
         retrieved_at: now,
         source_updated_at,
         latest_sample_at: None,
-        last_30_days: last_30_days
-            .context("Media degli ultimi 30 giorni assente in SteamCharts")?,
+        last_30_days: last_30_days.context("SteamCharts last-30-days average is missing")?,
         months,
         today: sample_average(&[], today, now),
         last_7_days: sample_average(&[], now - chrono::Duration::days(7), now),
         current_month: sample_average(&[], month_start, now),
         warnings: Vec::new(),
+        samples: Vec::new(),
+        cache_state: CacheState::Network,
     })
 }
 
-#[derive(Debug)]
-struct Sample {
-    at: DateTime<Utc>,
-    players: u64,
+#[derive(Debug, Clone, Serialize)]
+pub struct Sample {
+    pub at: DateTime<Utc>,
+    pub players: u64,
 }
 
 fn parse_samples(json: &str, now: DateTime<Utc>) -> Result<Vec<Sample>> {
     let data: Vec<(i64, u64)> =
-        serde_json::from_str(json).context("Formato del grafico SteamCharts non riconosciuto")?;
+        serde_json::from_str(json).context("Unrecognized SteamCharts chart format")?;
     let cutoff = now - chrono::Duration::days(30);
     let mut previous = None;
     let mut points = Vec::new();
     for (millis, players) in data {
         let at =
-            DateTime::from_timestamp_millis(millis).context("Timestamp SteamCharts non valido")?;
+            DateTime::from_timestamp_millis(millis).context("Invalid SteamCharts timestamp")?;
         ensure!(
             previous.is_none_or(|prev| at > prev),
-            "Campioni SteamCharts duplicati o non ordinati"
+            "Duplicate or unsorted SteamCharts samples"
         );
         ensure!(
             at <= now + chrono::Duration::minutes(5),
-            "Campione SteamCharts nel futuro"
+            "SteamCharts sample is in the future"
         );
         previous = Some(at);
         // I vecchi picchi giornalieri e mensili osservati sono etichettati alle 00:00 UTC.

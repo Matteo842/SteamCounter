@@ -1,158 +1,110 @@
 # SteamCounter
 
-Un piccolo programma in Rust per leggere **quanti giocatori sono attivi adesso in un gioco Steam**, partendo dal nome o dall'AppID, e consultare le medie da SteamCharts. Si usa dalla CLI oppure da una finestra desktop nativa. Non servono account, chiavi API, browser, database o un server sempre acceso.
+A lightweight Rust desktop app and CLI for Steam player counts, real charts and historical averages. Search by game name or AppID. No account, API key, embedded browser, telemetry or background collector.
 
-## Interfaccia desktop
+![SteamCounter desktop](docs/previews/dashboard.png)
 
-La UI usa **egui/eframe 0.29.1**, come il progetto Backlog, con una palette blu notte e azzurro. La ricerca parte al centro; dopo l'invio rimane in alto a destra, accanto al titolo del gioco. Una finestra da 1060 × 740 contiene riquadri e grafico senza scorrere; la dimensione minima è 900 × 640.
+## Download
+
+Get the Windows x64 portable ZIP from [Releases](https://github.com/Matteo842/SteamCounter/releases/latest), extract it and open **steamcounter-gui.exe**. The separate **steamcounter.exe** is the command-line app. Keep the included third-party notices with redistributed copies.
+
+Windows x64 is the tested release platform. The binaries are portable; Rust and build tools are only needed to compile the source. These executables are not code-signed.
+
+## Desktop
+
+- Type a game name or its Steam AppID and press **Enter** or **Search**. Ambiguous searches show a list of matches.
+- View players now, today's estimated average, the last 7 days, a selected month and a selected year. Month and year default to the current period.
+- Switch between **48h**, **1w**, **1m** and **1y** without making additional requests. Hover over a chart point for its timestamp and value.
+- The recent chart uses actual hourly player counts from SteamCharts. The yearly chart uses **published monthly averages**, not peaks. Missing hours and months remain empty.
+- For an older month without hourly detail, the chart shows a single bar for its **published monthly average**. It does not invent a daily curve. The source exposes only about 30 recent days of hourly samples; part of a selected month may be missing.
+- Current-year averages are provisional and include only available completed months, weighted by their number of days. The card reports how many months are included. Previous years require all 12 months.
+- Open **Settings** to control local history storage. Click the SteamCounter name to return to the home screen.
+- **Explore the demo** is explicitly marked and contains example numbers. Normal searches contain real data.
+
+## Optional local cache
+
+Enable **Settings → Save history on this computer** to reuse fetched charts and averages across searches and application restarts. It is off by default.
+
+| Data | Reuse policy |
+| --- | --- |
+| SteamCharts history | Saved locally and reused for one hour when enabled |
+| Published months / yearly calculations | Included in the same history snapshot; changing selections makes no requests |
+| Steam current count | Reused for up to 60 seconds in the current GUI session |
+| Name searches | Reused in memory for up to 24 hours in the current GUI session |
+
+After expiry, history refreshes on the next search. If a refresh fails, saved history remains available and is clearly marked **stale**, with its original timestamp and a warning. Failed history requests are paused for at least 15 minutes when caching is enabled; a longer provider retry interval is respected. This reduces requests but cannot guarantee exemption from a provider's rate limits.
+
+The history folder is limited to **50 MiB**. Oldest entries are removed when necessary. Files are validated and replaced atomically; corrupt entries are ignored and refreshed. This is a bounded cache of downloaded snapshots, not a permanent hourly archive or a server-side data collection service.
+
+On Windows, data lives in `%LOCALAPPDATA%\SteamCounter`: `settings.json` stores the preference and `history-v1` holds per-game history. macOS uses `~/Library/Application Support/SteamCounter`; Linux uses `$XDG_DATA_HOME/SteamCounter` or `~/.local/share/SteamCounter`. `STEAMCOUNTER_DATA_DIR` can override the location.
+
+Turning the option off stops cache reads and writes on subsequent requests. **Clear cache** deletes saved history while keeping the preference. An unwritable cache produces a warning and does not discard successfully fetched data. Nothing is uploaded from the cache.
+
+## Command line
 
 ```powershell
+.\steamcounter.exe 730
+.\steamcounter.exe "elden ring" --stats
+.\steamcounter.exe --search portal
+.\steamcounter.exe 730 --month 2026-08 --year 2025
+.\steamcounter.exe 730 --stats --cache
+.\steamcounter.exe 730 --stats --no-cache --json
+.\steamcounter.exe --help
+```
+
+The existing CLI commands are preserved. `--stats` adds historical averages; `--month YYYY-MM` and `--year YYYY` imply `--stats`. `--cache` and `--no-cache` override the saved GUI preference for that invocation. The CLI reads the current count directly from Steam each time; the 60-second in-memory reuse applies to the GUI.
+
+An **AppID** identifies a game: `730` in `https://store.steampowered.com/app/730/`. A user's SteamID is not an AppID. Use `--search` to look up a game whose title consists only of digits. Name lookup uses the English Steam Store in the IT region; removed or region-restricted games may require a direct AppID.
+
+The default timeout is 15 seconds per request, configurable with `--timeout 1..120`. Optional title lookup waits up to 5 seconds. A complete search may make multiple requests. HTTP 403/404/429 are reported rather than bypassed; there are no automatic polling loops.
+
+### JSON
+
+```powershell
+.\steamcounter.exe 730 --json
+.\steamcounter.exe 730 --stats --json
+```
+
+Basic output retains `appid`, `name`, `player_count` and `checked_at`. Search returns an array of games. Statistics return `appid`, `current`, `history`, `selected_month`, `selected_year` and `warnings`.
+
+`history.samples` contains the retained hourly points; `history.cache_state` is `network`, `fresh` or `stale`. `history.retrieved_at` remains the original download time when cached data is used. Averages and their coverage are recalculated for the requested current UTC periods. A missing value is `null`, never an invented zero.
+
+JSON goes to stdout; fatal errors go to stderr with a nonzero exit code. A partial result succeeds when at least one source is available and includes warnings. The CLI's yearly result still requires all 12 published months; the provisional current-year summary is a desktop feature.
+
+## What the numbers mean
+
+These are **concurrent players**, not unique daily or monthly users. Steam's current count is a snapshot, not today's average. Ready-made daily, weekly and current-month estimates come from SteamCharts hourly samples, so the app does not need to stay open.
+
+All periods use **UTC**. The current month starts on the first day; it is not the last 30 days. Estimates marked `~` are time-weighted over available hourly intervals of 30–90 minutes. Missing intervals and unobserved edges are excluded rather than filled with zero. Coverage is reported on the cards or in their details. Annual estimates weight published monthly means by calendar days and remain approximate.
+
+Data sources: [Valve's current-player endpoint](https://partner.steamgames.com/doc/webapi/ISteamUserStats#GetNumberOfCurrentPlayers), the Steam Store, and [SteamCharts](https://steamcharts.com/about). Store and SteamCharts endpoints are public but are not documented as stable APIs; formats and availability can change. See [data sources and methodology](docs/DATA_SOURCES.md).
+
+SteamCounter is not affiliated with Valve, SteamCharts or SteamDB. Their names and data remain their respective owners' property.
+
+## Build and develop
+
+Rust/Cargo **1.88+**. Windows MSVC builds also need Visual Studio C++ Build Tools.
+
+```powershell
+# CLI only: no GUI dependencies are compiled
+cargo run -- 730 --stats
+cargo build --release --locked
+
+# Native desktop app, using egui/eframe with OpenGL
 cargo run --features gui --bin steamcounter-gui
 cargo build --release --locked --features gui --bins
-.\target\release\steamcounter-gui.exe
-```
 
-L'eseguibile `steamcounter-gui.exe` si può aprire con un doppio clic, senza console. Anche la CLI `steamcounter.exe` resta disponibile. Le dipendenze grafiche sono opzionali: i normali comandi `cargo run -- ...` e `cargo build --release` continuano a compilare solo la CLI.
-
-- Cerca per nome o AppID e premi Invio o **Cerca**. Se ci sono più risultati, scegli il gioco dalla lista.
-- I riquadri mostrano giocatori adesso, media di oggi, ultimi 7 giorni, mese e anno. I menu partono dal mese e dall'anno correnti e permettono di consultare i periodi disponibili.
-- Nell'anno corrente la UI mostra una **media provvisoria dei soli mesi conclusi disponibili**, ponderata per i giorni. Il riquadro indica quanti mesi sono inclusi. Per gli anni passati occorrono tutti i 12 mesi; un valore mancante appare come `—`.
-- Le ricerche avvengono in background; una fonte non disponibile lascia consultabili i dati dell'altra. Passando sui riquadri e sugli avvisi si leggono dettagli e copertura.
-- Il grafico è per ora un **mockup interattivo**, indicato come **Anteprima grafico**: i tasti 48h, 1w, 1m e 1y cambiano la curva dimostrativa. Non è ancora collegato allo storico del gioco. I riquadri, dopo una ricerca, usano dati reali.
-
-Per provare il layout anche senza Internet, usa **Esplora l'anteprima** nella schermata iniziale oppure:
-
-```powershell
-.\target\release\steamcounter-gui.exe --demo
-.\target\release\steamcounter-gui.exe --game "elden ring"
-```
-
-In modalità demo **tutti** i numeri sono esempi. Nessun dato viene scaricato o salvato. Clicca sul nome SteamCounter in alto a sinistra per tornare alla ricerca iniziale.
-
-Schermate della finestra: [ricerca iniziale](docs/previews/home.png) e dashboard in modalità demo:
-
-![Dashboard SteamCounter con dati dimostrativi](docs/previews/dashboard.png)
-
-## Avvio rapido
-
-Servono Rust e Cargo **1.88 o successivi** e una connessione Internet. Su Windows serve anche il linker C++ della toolchain Rust MSVC (Visual Studio Build Tools, componente C++).
-
-Da questa cartella:
-
-```powershell
-cargo run -- 730
-cargo run -- "elden ring"
-cargo run -- Counter-Strike 2
-cargo run -- "elden ring" --stats
-```
-
-L'output contiene titolo, AppID, giocatori attivi e ora della lettura in UTC. I nomi con spazi funzionano anche senza virgolette; usa le virgolette se il nome contiene caratteri speciali per la shell.
-
-Per compilare l'eseguibile ottimizzato e usarlo direttamente su Windows:
-
-```powershell
-cargo build --release --locked
-.\target\release\steamcounter.exe 730
-.\target\release\steamcounter.exe "elden ring"
-```
-
-Su Linux/macOS l'eseguibile e `./target/release/steamcounter`. In alternativa, `cargo install --path . --locked` installa il comando nella cartella bin di Cargo, da aggiungere al PATH se necessario.
-
-L'eseguibile Windows si puo copiare e usare da solo. `target` contiene anche i file temporanei e le dipendenze della compilazione: questi non servono per eseguire l'applicazione. Durante l'uso non vengono scaricati immagini, pubblicita o script del sito e non viene salvato un archivio sul disco.
-
-## Ricerca per nome
-
-```powershell
-cargo run -- --search portal
-```
-
-La ricerca elenca i risultati restituiti dallo Store con il rispettivo AppID. Nella lettura del contatore viene scelto il nome esatto (ignorando maiuscole e spazi ripetuti), oppure l'unico risultato. Se rimangono piu candidati, vengono elencati e il comando termina con un errore: ripeti la richiesta con l'AppID desiderato.
-
-L'**AppID** identifica il gioco: per esempio, in `https://store.steampowered.com/app/730/` e `730`. Lo SteamID di un profilo utente non e un AppID. Per cercare un titolo composto soltanto da cifre, usa `--search`, poi scegli l'AppID.
-
-## Medie e storico su richiesta
-
-```powershell
-.\target\release\steamcounter.exe 730 --stats
-.\target\release\steamcounter.exe "elden ring" --month 2026-08
-.\target\release\steamcounter.exe 730 --year 2025
-.\target\release\steamcounter.exe 730 --stats --json
-```
-
-`--month` e `--year` includono automaticamente le statistiche. Tutti i periodi del nostro calcolo usano UTC.
-
-| Dato | Origine e significato |
-| --- | --- |
-| Giocatori attivi | Conteggio attuale ottenuto direttamente da Steam |
-| Oggi | Stima dai campioni orari SteamCharts, da mezzanotte UTC alla richiesta |
-| Ultimi 7 giorni | Stima dai campioni orari SteamCharts, su una finestra mobile di 168 ore |
-| Mese in corso | Stima dai campioni orari disponibili dal primo del mese alla richiesta |
-| Ultimi 30 giorni | Media pubblicata da SteamCharts; non equivale al mese di calendario |
-| Mese completato | Media della tabella SteamCharts, selezionabile con `--month YYYY-MM` |
-| Anno completato | Stima dalle 12 medie mensili, ponderate per i giorni dei mesi (anche bisestili) |
-
-Le stime sono indicate con `~`. Per giorno, settimana e mese corrente mostriamo anche la percentuale del periodo coperta dai campioni. Si interpola linearmente solo tra letture distanti da 30 a 90 minuti: i buchi maggiori e le estremita senza dati rimangono esclusi, non diventano zero. Il risultato descrive il **tempo coperto**, non promette una media esatta sull'intero intervallo se la copertura e incompleta.
-
-Il grafico SteamCharts contiene circa 30 giorni di campioni orari recenti e picchi aggregati per i periodi piu vecchi. Questi picchi non sono medie: il programma li esclude dai calcoli. Si tratta di un formato non documentato come API stabile; i risultati recenti sono stime, non le medie ufficiali di SteamCharts. Il 31 del mese i primi campioni del mese possono gia essere fuori dalla finestra disponibile: la copertura lo segnala.
-
-Nella CLI la media annuale viene mostrata soltanto con tutti i 12 mesi presenti ed e comunque una stima: le medie mensili pubblicate sono arrotondate e non dichiarano il numero di campioni sottostanti. Un anno incompleto, compreso quello in corso, risulta non disponibile. La UI aggiunge un riepilogo provvisorio dell'anno corrente, esplicitamente distinto dalla media di un anno completo.
-
-Il conteggio live non e una media giornaliera. Per avere una media giornaliera pronta senza tenere acceso il programma, anche questa viene ricavata dai campioni di SteamCharts. Non raccogliamo dati in background.
-
-Con `--stats` vengono fatte due piccole richieste aggiuntive, solo per il gioco scelto: tabella delle medie e JSON del grafico. Nella prova con CS2 erano circa **75 KB complessivi**. Nessuna cache persistente; limite di 2 MiB per risposta. Evita aggiornamenti continui: la fonte storica si aggiorna circa ogni ora.
-
-Se una fonte fallisce, i dati dell'altra restano disponibili con un avviso. Se fallisce solo il grafico, rimangono le medie mensili pubblicate. La modalita statistiche termina con successo se almeno una fonte e disponibile; in caso di risultato parziale occorre leggere gli avvisi. Senza alcuna fonte disponibile termina con un errore.
-
-## JSON e opzioni
-
-```powershell
-cargo run --quiet -- 730 --json
-cargo run --quiet -- --search portal --json
-cargo run -- 730 --timeout 30
-cargo run -- --help
-```
-
-Esempio di struttura JSON, con valori illustrativi:
-
-```json
-{
-  "appid": 730,
-  "name": "Counter-Strike 2",
-  "player_count": 123456,
-  "checked_at": "2026-09-03T12:00:00Z"
-}
-```
-
-`checked_at` e l'istante UTC in cui SteamCounter ha ricevuto il conteggio, non un timestamp fornito da Steam. `name` puo essere `null` se lo Store non fornisce il titolo: la lettura tramite AppID funziona comunque. `--search --json` restituisce invece un array di oggetti con `appid` e `name`, anche vuoto.
-
-`--stats --json` restituisce un oggetto con `appid`, `current`, `history`, `selected_month`, `selected_year` e `warnings`. `history` contiene fonte, ora del download, aggiornamento dichiarato dalla fonte, ultimo campione, medie recenti e tabella dei mesi. Le medie mancanti sono `null`; una media numerica `0` indica un valore effettivamente disponibile. Gli avvisi sono inclusi nel JSON. Senza `--stats` la struttura JSON originale resta invariata.
-
-Il timeout predefinito e **15 secondi per richiesta**, modificabile da 1 a 120. Il recupero opzionale del titolo tramite AppID attende al massimo 5 secondi. La durata complessiva puo includere piu richieste.
-
-Gli errori fatali vanno su stderr e producono un codice di uscita diverso da zero. Con `--json`, stdout contiene solo il risultato JSON in caso di successo e rimane vuoto in caso di errore fatale. `--quiet` elimina anche i messaggi di compilazione di Cargo. Una risposta mancante o fallita non viene mai convertita in zero giocatori.
-
-## Fonti e limiti
-
-- Conteggio: API pubblica di Valve [`GetNumberOfCurrentPlayers`](https://partner.steamgames.com/doc/webapi/ISteamUserStats#GetNumberOfCurrentPlayers), interrogata su `api.steampowered.com`. Conta i giocatori attivi connessi a Steam; i giocatori offline non sono inclusi.
-- Nomi: endpoint pubblici dello Steam Store [`storesearch`](https://store.steampowered.com/api/storesearch/?term=portal&l=english&cc=IT) e [`appdetails`](https://store.steampowered.com/api/appdetails?appids=730&filters=basic&l=english&cc=IT). Sono endpoint non documentati come API stabili da Valve: possono cambiare. La ricerca usa lingua inglese e regione Italia, e non garantisce di trovare titoli rimossi o non disponibili nella regione. In questi casi prova l'AppID direttamente.
-- I bundle e i pacchetti vengono esclusi dalla ricerca; DLC, demo e altre applicazioni possono comparire. Per il conteggio del gioco usa l'AppID del **gioco base**. Steam puo non rendere disponibile un conteggio per alcune applicazioni.
-- Storico: tabella pubblica di [SteamCharts](https://steamcharts.com/app/730) e JSON usato dal suo grafico. Gli endpoint non sono un'API ufficiale stabile e potrebbero cambiare o diventare indisponibili. Le fonti provate e le scelte del calcolo sono descritte in [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md).
-- Ogni esecuzione fa una lettura su richiesta. Il dato puo risentire dell'aggiornamento e della cache delle fonti. Non sono implementati polling o salvataggio locale.
-
-## Sviluppo e prossimi passi
-
-```powershell
+# Verification
 cargo fmt --check
 cargo test --locked
-cargo clippy --all-targets --locked -- -D warnings
 cargo test --features gui --locked
 cargo clippy --features gui --all-targets --locked -- -D warnings
 ```
 
-I test usano risposte HTTP locali e dati sintetici: verificano ricerca e selezione del titolo, conteggi, JSON, AppID non validi, errori delle fonti, parsing delle medie, esclusione dei picchi, copertura temporale e ponderazione annuale senza dipendere da Internet.
+`target` holds compilation artifacts; these are not required to run the portable binaries. `cargo run --features gui --bin steamcounter-gui -- --demo` opens the offline demo; `--game 730` loads a game immediately.
 
-Il client Steam e il modello `PlayerSnapshot` sono in `src/lib.rs`; il provider SteamCharts e in `src/history.rs`; la CLI è in `src/main.rs`. La UI è in `src/gui/` e riusa gli stessi client: `mod.rs` gestisce finestra e ricerca, `data.rs` carica e presenta le statistiche, `style.rs` definisce il tema e `chart.rs` disegna il grafico dimostrativo. Non vengono aggiunti browser incorporati o servizi locali.
+The clients are in `src/lib.rs` and `src/history.rs`; cache/settings in `src/cache.rs`; timestamp-aware chart series in `src/series.rs`; CLI in `src/main.rs`; native UI in `src/gui/`. Tests use local HTTP fixtures and synthetic data, including cache expiry, failure fallback, corrupt files, storage limits, missing intervals and monthly averages versus peaks.
 
-Per acquisire schermate della UI durante lo sviluppo, compila con `--features gui-preview --bin steamcounter-gui` e imposta `EFRAME_SCREENSHOT_TO` al percorso del PNG. La finestra si chiude dopo l'acquisizione; con `--game` attende il risultato della ricerca. L'opzione `--compact` permette di controllare il layout alla dimensione minima. Queste acquisizioni usano il rendering della finestra nativa.
+After a release build, `./scripts/package-windows.ps1` creates the portable ZIP and SHA-256 checksum under `target/packages`, including dependency notices, font licenses and unmodified MPL-covered sources. Packaging requires PowerShell 7 and ripgrep; neither is needed to run the app.
 
-La direzione del progetto e una piccola applicazione locale che interroga fonti esistenti. Non e necessario costruire un servizio di raccolta o replicare il database di SteamDB. Un eventuale provider API documentato puo essere aggiunto in futuro mantenendo esplicita la provenienza delle medie.
+For native screenshots, build with `--features gui-preview --bin steamcounter-gui` and set `STEAMCOUNTER_SCREENSHOT_TO` to a PNG path. The app exits after capture and waits for `--game` results and layout first. `--compact`, `--preview-range 1y`, `--preview-month YYYY-MM`, `--preview-year YYYY` and `--preview-settings` are development preview options.

@@ -160,21 +160,25 @@ fn api_failures_never_become_zero_players() {
         (
             200,
             r#"{"response":{"result":42,"player_count":0}}"#,
-            "codice 42",
+            "code 42",
         ),
         (
             200,
             r#"{"response":{"result":1}}"#,
-            "non contiene il conteggio",
+            "does not contain a player count",
         ),
         (
             200,
             r#"{"response":{"result":1,"player_count":null}}"#,
-            "non contiene il conteggio",
+            "does not contain a player count",
         ),
-        (200, "<html>unavailable</html>", "JSON non valida"),
-        (429, "rate limit", "troppe richieste"),
-        (500, "server error", "errore HTTP"),
+        (
+            200,
+            "<html>unavailable</html>",
+            "invalid or incompatible JSON",
+        ),
+        (429, "rate limit", "too many requests"),
+        (500, "server error", "HTTP error"),
     ] {
         let (client, server) = fixture(vec![("/players?appid=730", status, body)]);
         let error = client

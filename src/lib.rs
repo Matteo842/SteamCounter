@@ -1,6 +1,8 @@
 //! Accesso a Steam separato dalla CLI, riutilizzabile per storico e interfacce future.
 
+pub mod cache;
 pub mod history;
+pub mod series;
 
 #[cfg(feature = "gui")]
 pub mod gui;
@@ -24,7 +26,7 @@ pub struct Game {
 }
 
 /// Una lettura puntuale: checked_at indica quando abbiamo ricevuto il conteggio.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PlayerSnapshot {
     pub appid: NonZeroU32,
     pub name: Option<String>,
@@ -42,11 +44,11 @@ impl GameQuery {
     pub fn parse(input: &str) -> Result<Self> {
         let input = input.trim();
         if input.is_empty() {
-            bail!("Inserisci il nome di un gioco oppure il suo AppID Steam.");
+            bail!("Enter a game name or its Steam AppID.");
         }
         if input.bytes().all(|byte| byte.is_ascii_digit()) {
             let appid = input.parse::<NonZeroU32>().context(
-                "AppID non valido: usa un numero tra 1 e 4294967295 (non lo SteamID di un utente).",
+                "Invalid AppID: use a number from 1 to 4294967295, not a user's SteamID.",
             )?;
             Ok(Self::AppId(appid))
         } else {
@@ -102,7 +104,7 @@ impl SteamClient {
             .timeout(timeout)
             .connect_timeout(timeout.min(Duration::from_secs(10)))
             .build()
-            .context("Impossibile inizializzare la connessione a Steam")?;
+            .context("Could not initialize the Steam connection")?;
         Ok(Self {
             http,
             players_url: PLAYERS_URL.to_owned(),
@@ -115,7 +117,7 @@ impl SteamClient {
     /// Ricerca pubblica dello Store: non richiede una chiave API.
     pub fn search(&self, query: &str) -> Result<Vec<Game>> {
         if query.trim().is_empty() {
-            bail!("Il nome da cercare non puo essere vuoto.");
+            bail!("The search name cannot be empty.");
         }
         let response: SearchResponse = self.get_json(
             &self.search_url,
@@ -152,13 +154,14 @@ impl SteamClient {
         )?;
         if response.response.result != 1 {
             bail!(
-                "Steam non ha un conteggio disponibile per l'AppID {appid} (codice {}). Verifica che sia l'AppID del gioco base.",
+                "Steam has no count for AppID {appid} (code {}). Check that this is the base game's AppID.",
                 response.response.result
             );
         }
-        let player_count = response.response.player_count.context(
-            "La risposta di Steam non contiene il conteggio dei giocatori. Riprova piu tardi.",
-        )?;
+        let player_count = response
+            .response
+            .player_count
+            .context("Steam's response does not contain a player count. Try again later.")?;
         let checked_at = Utc::now();
         let name = known_name.or_else(|| self.app_name(appid).ok().flatten());
         Ok(PlayerSnapshot {
@@ -203,23 +206,23 @@ impl SteamClient {
             .send()
             .map_err(|error| {
                 let context = if error.is_timeout() {
-                    "Steam non ha risposto in tempo. Riprova o aumenta --timeout."
+                    "Steam timed out. Try again later or increase --timeout."
                 } else {
-                    "Connessione a Steam non riuscita. Controlla la rete e riprova."
+                    "Could not connect to Steam. Check your connection and try again."
                 };
                 anyhow::Error::new(error.without_url()).context(context)
             })?;
         if response.status() == StatusCode::TOO_MANY_REQUESTS {
-            bail!("Steam ha ricevuto troppe richieste (HTTP 429). Attendi e riprova.");
+            bail!("Steam received too many requests (HTTP 429). Wait before trying again.");
         }
         let response = response
             .error_for_status()
             .map_err(|error| anyhow::Error::new(error.without_url()))
-            .context("Steam ha restituito un errore HTTP")?;
+            .context("Steam returned an HTTP error")?;
         response
             .json()
             .map_err(|error| anyhow::Error::new(error.without_url()))
-            .context("Steam ha restituito una risposta JSON non valida o incompatibile")
+            .context("Steam returned invalid or incompatible JSON")
     }
 }
 

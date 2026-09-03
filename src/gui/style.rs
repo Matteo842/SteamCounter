@@ -20,6 +20,10 @@ pub fn configure(ctx: &Context) {
     ctx.set_theme(egui::Theme::Dark);
     ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
     let mut style = (*ctx.style()).clone();
+    #[cfg(feature = "gui-preview")]
+    if std::env::var_os("STEAMCOUNTER_SCREENSHOT_TO").is_some() {
+        style.animation_time = 0.0;
+    }
     style.visuals = egui::Visuals::dark();
     style.visuals.panel_fill = BG;
     style.visuals.window_fill = PANEL;
@@ -85,18 +89,18 @@ pub fn brand(ui: &Ui, top_left: Pos2, size: f32) {
 
 pub fn month_name(date: NaiveDate) -> String {
     const MONTHS: [&str; 12] = [
-        "Gennaio",
-        "Febbraio",
-        "Marzo",
-        "Aprile",
-        "Maggio",
-        "Giugno",
-        "Luglio",
-        "Agosto",
-        "Settembre",
-        "Ottobre",
-        "Novembre",
-        "Dicembre",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ];
     format!("{} {}", MONTHS[date.month0() as usize], date.year())
 }
@@ -106,7 +110,7 @@ pub fn number(value: f64) -> String {
     let mut result = String::new();
     for (i, ch) in raw.chars().enumerate() {
         if i > 0 && (raw.len() - i).is_multiple_of(3) {
-            result.push('.');
+            result.push(',');
         }
         result.push(ch);
     }

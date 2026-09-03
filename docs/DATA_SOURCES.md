@@ -1,49 +1,50 @@
-# Fonti dello storico: verifica del 3 settembre 2026
+# Data sources and methodology
 
-Obiettivo: medie disponibili su richiesta per un singolo gioco, senza browser, account obbligatori, database locale o un raccoglitore sempre acceso.
+Verified on September 3, 2026. SteamCounter fetches data for a requested game without a browser, API key or permanent collector.
 
-## Strade verificate
+## Providers
 
-| Fonte | Verifica | Esito |
-| --- | --- | --- |
-| Steam ufficiale | Endpoint `GetNumberOfCurrentPlayers`, gia in uso | Ottimo per il dato live; non fornisce la media del mese |
-| SteamCharts | GET pubblico della pagina di CS2 e del JSON del grafico; secondo grafico verificato con Elden Ring | HTTP 200 senza login o chiave; integrato |
-| SteamDB | FAQ su API e raccolta automatica | Non offre attualmente un'API pubblica documentata utilizzabile qui; la FAQ indirizza alle partnership e vieta scraping/crawling. Non implementato |
-| OpenGameStats | Documentazione dello storico; GET senza chiave su `players/history?interval=hour&limit=1` | HTTP 401: serve una chiave personale. Alternativa documentata per il futuro, non attivata |
+| Source | Finding |
+| --- | --- |
+| Steam | Public `GetNumberOfCurrentPlayers` supplies the current concurrent-player count, not historical averages. |
+| SteamCharts | Public game page and chart JSON work without login. The page supplies completed-month averages; the graph supplies recent hourly counts mixed with historical peaks. |
+| SteamDB | Its FAQ does not offer an applicable public API and disallows scraping/crawling. Not used. |
+| OpenGameStats | Historical API requires a personal key (the tested unauthenticated request returned HTTP 401). Not integrated. |
 
-Fonti: [Valve](https://partner.steamgames.com/doc/webapi/ISteamUserStats#GetNumberOfCurrentPlayers), [SteamCharts About](https://steamcharts.com/about), [SteamDB FAQ](https://steamdb.info/faq/), [OpenGameStats storico](https://opengamestats.com/en-US/blog/historical-steam-data-api).
+References: [Valve](https://partner.steamgames.com/doc/webapi/ISteamUserStats#GetNumberOfCurrentPlayers), [SteamCharts About](https://steamcharts.com/about), [SteamDB FAQ](https://steamdb.info/faq/), [OpenGameStats historical API](https://opengamestats.com/en-US/blog/historical-steam-data-api).
 
-## SteamCharts: cosa viene letto
+## SteamCharts requests
 
-1. `https://steamcharts.com/app/{appid}`: la tabella HTML contiene `Last 30 Days` e le medie dei mesi completati. Non si scaricano immagini, script o pubblicita.
-2. `https://steamcharts.com/app/{appid}/chart-data.json`: array di coppie `[timestamp_unix_ms, conteggio]`, referenziato direttamente dalla pagina pubblica.
+1. `https://steamcharts.com/app/{appid}`: HTML table with `Last 30 Days` and averages for completed calendar months.
+2. `https://steamcharts.com/app/{appid}/chart-data.json`: the public chart's array of `[unix_timestamp_ms, count]` pairs.
 
-Per CS2: pagina 52.289 byte e grafico 22.163 byte nella prova iniziale. Per Elden Ring il grafico era 18.334 byte. Sono dimensioni osservate, non limiti garantiti. L'applicazione impone 2 MiB per risposta e non salva questi dati sul disco.
+Initial CS2 responses were about 52 KB of HTML and 22 KB of chart JSON; these are observations, not guaranteed sizes. Each response is capped at 2 MiB. The app downloads no page images, ads or scripts. Requests use an identifiable SteamCounter User-Agent. There are no login sessions or attempts to bypass provider blocks.
 
-Non e un'API documentata con garanzie di stabilita. Le richieste usano uno User-Agent identificabile `SteamCounter/<version> (personal CLI)`, senza sessioni, browser o tentativi di aggirare blocchi. HTTP 403, 404 e 429 sono riportati come indisponibilita della fonte.
+These endpoints are not a documented stable API. A changed table, invalid value, duplicate or out-of-order timestamp, or unexpected response is reported as unavailable. Published monthly data remains accessible if only the hourly chart fails.
 
-## Interpretazione dei dati
+## Separating counts, peaks and means
 
-La tabella e il grafico servono a scopi diversi. Nella risposta di CS2 osservata:
+Observed chart responses contain older **monthly peaks**, then daily peaks timestamped at exactly midnight UTC, then approximately hourly counts for about the last 30 days. Peaks must not be interpreted as averages.
 
-- I valori piu vecchi del grafico corrispondono ai **picchi mensili**, non alle medie della tabella.
-- Seguono picchi giornalieri etichettati alle 00:00 UTC.
-- Gli ultimi circa 30 giorni contengono letture a distanza approssimativa di un'ora.
+The app retains only points from the 30 days preceding the download and excludes exact-midnight points as ambiguous. This may also exclude an actual sample at midnight; a small gap is preferable to treating an aggregate peak as a concurrent-player sample. Interpretation of this undocumented format is an inference, not a guarantee from the provider.
 
-Le medie pubblicate della tabella vengono conservate senza ricalcolarle. Non si rinomina `Last 30 Days` come "mese corrente".
+For daily, weekly and current-month estimates, the app integrates linearly only between samples 30–90 minutes apart and clips each interval to the requested period. The area is divided by the time actually covered. Longer gaps, missing edges and the time after the latest sample are not filled. Coverage is covered time divided by the requested duration. All boundaries use UTC.
 
-Per le stime recenti vengono selezionati solo punti degli ultimi 30 giorni e scartati quelli etichettati esattamente alle 00:00 UTC, potenzialmente aggregati. Si rinuncia anche a un eventuale campione reale a quell'istante, preferendo una piccola lacuna all'inclusione di un picco. Si accettano per il calcolo solo coppie di punti distanti da 30 a 90 minuti.
+The table's published monthly means are preserved. A yearly estimate is the sum of `monthly_mean * days_in_month` divided by the included days. Full-year CLI and past-year GUI results require 12 months. The current-year GUI summary uses available completed months, explicitly labeled provisional. It excludes the current month. Published rounding and unknown sampling coverage make yearly results estimates.
 
-Il calcolo integra linearmente il conteggio tra ciascuna coppia valida, ritagliando l'intervallo richiesto. La media e l'area risultante divisa per il tempo coperto. Intervalli maggiori, parti del periodo senza campioni e l'intervallo dall'ultima lettura fino alla richiesta non sono riempiti. La copertura e il tempo coperto diviso per la durata richiesta.
+## Charts
 
-Questa e un'inferenza sul formato osservato, non un contratto della fonte. Il programma presenta questi numeri come **stime**; non pretende che coincidano con le medie calcolate internamente da SteamCharts. Se il formato cambia in modo incompatibile, la lettura fallisce con un avviso. Le medie mensili restano disponibili se fallisce soltanto il grafico.
+- 48h / 1w: retained hourly counts plotted at their real timestamps.
+- 1m: available hourly counts in the selected calendar month; no extension into missing time. If hourly detail has expired, a single bar shows the published monthly mean when available.
+- 1y: published means for completed months of the selected year. Points are positioned at the middle of their month; missing months break the line.
+- The lower overview uses published monthly averages, not the provider's aggregate peaks.
 
-La stima annuale usa la somma di `media_mensile * giorni_del_mese`, divisa per il numero di giorni dell'anno. Servono tutti i 12 mesi. Rimane approssimata per arrotondamenti e copertura dei dati originali non dichiarata dalla fonte; ad esempio il mese di lancio potrebbe essere parziale.
+No real-data view is supplemented with demo points. Demo mode is explicitly labeled throughout the UI.
 
-## Limiti del prodotto
+## Cache and freshness
 
-- Il conteggio Steam e istantaneo. Anche la media giornaliera pronta proviene dallo storico esterno: non viene inventata da una singola lettura Steam.
-- Oggi e mese corrente sono periodi incompleti per definizione; "ultimi 7 giorni" e una finestra mobile.
-- Nei mesi da 31 giorni puo mancare l'inizio del mese nei campioni recenti; viene mostrata la copertura effettiva.
-- Le medie misurano giocatori contemporanei, non utenti unici giornalieri o mensili.
-- Non sono stati creati account, acquistati servizi o inviati messaggi ai fornitori.
+Opt-in local storage preserves the source responses and their download timestamp in per-AppID JSON files. Cached responses are revalidated before reuse; current-period averages are recalculated for the time of the request. Reuse lasts one hour and can survive restarts. The GUI displays cached/stale status and the original history timestamp separately from the Steam count's timestamp.
+
+On a refresh failure, a previous snapshot can be returned with a stale warning. The cache records a retry pause of at least 15 minutes and respects longer provider retry intervals. Even an initial failure without saved data gets a pause marker. No missing response becomes zero players. With persistence disabled, no history cache is read or written.
+
+The history cache has a 50 MiB limit, removes oldest entries, and does not retain a permanent growing hourly archive. Clear cache only deletes this application's per-AppID history entries. Steam live counts and search results have short in-memory reuse in the GUI; the CLI always requests its live count directly.

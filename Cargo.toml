@@ -1,16 +1,16 @@
 [package]
 name = "steamcounter"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Giocatori Steam e medie, da riga di comando e in una finestra desktop"
+description = "Steam player counts, charts and averages in a lightweight desktop app and CLI"
 publish = false
 default-run = "steamcounter"
 
 [features]
 default = []
 gui = ["dep:eframe"]
-gui-preview = ["gui", "eframe/__screenshot"]
+gui-preview = ["gui", "dep:image"]
 
 [[bin]]
 name = "steamcounter"
@@ -26,6 +26,7 @@ anyhow = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
 eframe = { version = "0.29.1", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 scraper = { version = "0.24", default-features = false }
 serde = { version = "1.0", features = ["derive"] }

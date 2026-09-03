@@ -1,8 +1,13 @@
 mod chart;
 mod data;
+#[cfg(feature = "gui-preview")]
+mod preview;
 mod style;
 
-use std::{sync::mpsc, time::Duration};
+use std::{
+    sync::{Arc, Mutex, mpsc},
+    time::Duration,
+};
 
 use chrono::{Datelike, NaiveDate, Utc};
 use clap::Parser;
@@ -12,25 +17,34 @@ use eframe::egui::{
 };
 
 use crate::Game;
+use crate::cache::{CacheState, HistoryCache, Settings};
 use chart::ChartRange;
 use data::{DashboardData, Loaded, WorkerMessage};
 use style::*;
 
 #[derive(Parser)]
-#[command(
-    name = "steamcounter-gui",
-    version,
-    about = "SteamCounter: interfaccia desktop"
-)]
+#[command(name = "steamcounter-gui", version, about = "SteamCounter desktop")]
 struct Options {
-    /// Apre un'anteprima con dati dimostrativi, senza rete
+    /// Open an offline demo with example data
     #[arg(long)]
     demo: bool,
-    /// Cerca subito un gioco all'apertura
+    /// Search for a game on startup
     #[arg(long)]
     game: Option<String>,
     #[arg(long, hide = true)]
     compact: bool,
+    #[cfg(feature = "gui-preview")]
+    #[arg(long, hide = true, value_parser = ["48h", "1w", "1m", "1y"])]
+    preview_range: Option<String>,
+    #[cfg(feature = "gui-preview")]
+    #[arg(long, hide = true, value_parser = crate::history::parse_month)]
+    preview_month: Option<NaiveDate>,
+    #[cfg(feature = "gui-preview")]
+    #[arg(long, hide = true, value_parser = clap::value_parser!(i32).range(2012..=9998))]
+    preview_year: Option<i32>,
+    #[cfg(feature = "gui-preview")]
+    #[arg(long, hide = true)]
+    preview_settings: bool,
 }
 
 pub fn run() -> eframe::Result {
@@ -71,6 +85,14 @@ struct SteamCounterApp {
     request_id: u64,
     sender: mpsc::Sender<WorkerMessage>,
     receiver: mpsc::Receiver<WorkerMessage>,
+    settings: Settings,
+    settings_open: bool,
+    settings_message: Option<String>,
+    cache_size: u64,
+    session: Arc<Mutex<data::Session>>,
+    pending_requests: usize,
+    #[cfg(feature = "gui-preview")]
+    preview: Option<preview::Capture>,
 }
 
 impl SteamCounterApp {
@@ -78,6 +100,10 @@ impl SteamCounterApp {
         configure(ctx);
         let now = Utc::now();
         let (sender, receiver) = mpsc::channel();
+        let (settings, settings_message) = match Settings::load() {
+            Ok(settings) => (settings, None),
+            Err(error) => (Settings::default(), Some(format!("{error:#}"))),
+        };
         let mut app = Self {
             query: String::new(),
             has_searched: false,
@@ -92,19 +118,42 @@ impl SteamCounterApp {
             request_id: 0,
             sender,
             receiver,
+            settings,
+            settings_open: false,
+            settings_message,
+            cache_size: 0,
+            session: Arc::new(Mutex::new(data::Session::default())),
+            pending_requests: 0,
+            #[cfg(feature = "gui-preview")]
+            preview: preview::Capture::from_env(),
         };
         if options.demo {
             app.open_demo();
         } else if let Some(game) = options.game {
             app.query = game;
             app.search(ctx, None);
-            // Solo per acquisizioni di sviluppo: il secondo frame deve contenere
-            // il risultato, non la schermata di caricamento. Nessuna attesa nella UI normale.
-            #[cfg(feature = "gui-preview")]
-            if std::env::var_os("EFRAME_SCREENSHOT_TO").is_some()
-                && let Ok(message) = app.receiver.recv_timeout(Duration::from_secs(70))
-            {
-                app.apply_message(message);
+        }
+        #[cfg(feature = "gui-preview")]
+        {
+            if let Some(month) = options.preview_month {
+                app.selected_month = month;
+            }
+            if let Some(year) = options.preview_year {
+                app.selected_year = year;
+            }
+            if let Some(range) = options.preview_range {
+                app.range = match range.as_str() {
+                    "48h" => ChartRange::Hours,
+                    "1w" => ChartRange::Week,
+                    "1y" => ChartRange::Year,
+                    _ => ChartRange::Month,
+                };
+            }
+            app.settings_open = options.preview_settings;
+            if app.settings_open {
+                app.cache_size = HistoryCache::new(true)
+                    .and_then(|cache| cache.size_bytes())
+                    .unwrap_or(0);
             }
         }
         app
@@ -137,6 +186,9 @@ impl SteamCounterApp {
     }
 
     fn search(&mut self, ctx: &Context, selected: Option<Game>) {
+        if self.busy {
+            return;
+        }
         if self.query.trim().is_empty() && selected.is_none() {
             return;
         }
@@ -144,18 +196,28 @@ impl SteamCounterApp {
         self.has_searched = true;
         self.focus_search = false;
         self.busy = true;
+        self.pending_requests += 1;
         self.data = None;
         self.candidates.clear();
         self.error = None;
         let now = Utc::now();
         self.selected_month = NaiveDate::from_ymd_opt(now.year(), now.month(), 1).unwrap();
         self.selected_year = now.year();
+        let cache = match HistoryCache::new(self.settings.cache_enabled) {
+            Ok(cache) => cache,
+            Err(error) => {
+                self.settings_message = Some(format!("{error:#}"));
+                HistoryCache::disabled()
+            }
+        };
         data::spawn(
             self.request_id,
             self.query.trim().to_owned(),
             selected,
             self.sender.clone(),
             ctx.clone(),
+            cache,
+            self.session.clone(),
         );
     }
 
@@ -166,6 +228,7 @@ impl SteamCounterApp {
     }
 
     fn apply_message(&mut self, message: WorkerMessage) {
+        self.pending_requests = self.pending_requests.saturating_sub(1);
         if message.id != self.request_id {
             return;
         }
@@ -178,7 +241,7 @@ impl SteamCounterApp {
     }
 
     fn search_field(&mut self, ui: &mut Ui, rect: Rect, large: bool) -> bool {
-        let button_width = if large { 94.0 } else { 66.0 };
+        let button_width = if large { 94.0 } else { 76.0 };
         let edit_rect = Rect::from_min_max(
             rect.min,
             pos2(rect.right() - button_width - 8.0, rect.bottom()),
@@ -201,9 +264,9 @@ impl SteamCounterApp {
             egui::TextEdit::singleline(&mut self.query)
                 .id(egui::Id::new("game_search"))
                 .hint_text(if large {
-                    "Nome del gioco o AppID"
+                    "Game name or AppID"
                 } else {
-                    "Cerca un altro gioco"
+                    "Search for another game"
                 })
                 .font(FontId::proportional(if large { 17.0 } else { 14.0 }))
                 .margin(Vec2::ZERO)
@@ -225,7 +288,7 @@ impl SteamCounterApp {
             .put(
                 button_rect,
                 egui::Button::new(
-                    RichText::new("Cerca")
+                    RichText::new("Search")
                         .size(if large { 16.0 } else { 14.0 })
                         .strong()
                         .color(WHITE),
@@ -240,19 +303,23 @@ impl SteamCounterApp {
 
     fn welcome(&mut self, ui: &mut Ui, rect: Rect, ctx: &Context) {
         brand(ui, rect.left_top(), 18.0);
+        self.settings_button(
+            ui,
+            Rect::from_min_size(pos2(rect.right() - 80.0, rect.top()), vec2(80.0, 32.0)),
+        );
         let content_width = 600.0_f32.min(rect.width() - 60.0);
         let center = rect.center() - vec2(0.0, 12.0);
         ui.painter().text(
             pos2(center.x, center.y - 101.0),
             Align2::CENTER_CENTER,
-            "Chi sta giocando?",
+            "Who's playing?",
             FontId::proportional(36.0),
             WHITE,
         );
         ui.painter().text(
             pos2(center.x, center.y - 61.0),
             Align2::CENTER_CENTER,
-            "I tuoi giochi, in numeri.",
+            "Your games, in numbers.",
             FontId::proportional(16.0),
             MUTED,
         );
@@ -262,7 +329,7 @@ impl SteamCounterApp {
         }
         let games = ["Counter-Strike 2", "Dota 2", "ELDEN RING"];
         let examples_width = ui.fonts(|fonts| {
-            std::iter::once("Prova")
+            std::iter::once("Try")
                 .chain(games)
                 .map(|label| {
                     fonts
@@ -280,7 +347,7 @@ impl SteamCounterApp {
                 .max_rect(examples)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
-                ui.label(RichText::new("Prova").size(12.0).color(MUTED));
+                ui.label(RichText::new("Try").size(12.0).color(MUTED));
                 for game in games {
                     if ui
                         .add(
@@ -301,12 +368,8 @@ impl SteamCounterApp {
         if ui
             .put(
                 demo,
-                egui::Button::new(
-                    RichText::new("Esplora l'anteprima")
-                        .size(13.0)
-                        .color(ACCENT),
-                )
-                .frame(false),
+                egui::Button::new(RichText::new("Explore the demo").size(13.0).color(ACCENT))
+                    .frame(false),
             )
             .clicked()
         {
@@ -315,7 +378,7 @@ impl SteamCounterApp {
         ui.painter().text(
             pos2(rect.center().x, rect.bottom() - 6.0),
             Align2::CENTER_BOTTOM,
-            "Steam per il live. SteamCharts per lo storico.",
+            "Live counts from Steam. History from SteamCharts.",
             FontId::proportional(12.0),
             DIM,
         );
@@ -336,15 +399,22 @@ impl SteamCounterApp {
         if ui
             .interact(home, ui.id().with("home"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text("Torna alla ricerca")
+            .on_hover_text("Back to search")
             .clicked()
         {
             self.home();
             return;
         }
         let search_width = if rect.width() < 940.0 { 300.0 } else { 342.0 };
+        self.settings_button(
+            ui,
+            Rect::from_min_size(
+                pos2(rect.right() - 80.0, rect.top() + 16.0),
+                vec2(80.0, 34.0),
+            ),
+        );
         let search = Rect::from_min_size(
-            pos2(rect.right() - search_width, rect.top() + 12.0),
+            pos2(rect.right() - 94.0 - search_width, rect.top() + 12.0),
             vec2(search_width, 42.0),
         );
         if self.search_field(ui, search, false) {
@@ -355,9 +425,9 @@ impl SteamCounterApp {
             .as_ref()
             .map(|data| data.name.as_str())
             .unwrap_or(if self.busy {
-                "Cerco il tuo gioco…"
+                "Finding your game…"
             } else {
-                "Trova il tuo gioco"
+                "Find your game"
             });
         let title_rect = Rect::from_min_max(
             pos2(rect.left(), rect.top() + 32.0),
@@ -391,10 +461,10 @@ impl SteamCounterApp {
                 .rect(*card, 9.0, PANEL, Stroke::new(1.0, BORDER));
         }
         let metrics = data.metrics(self.selected_month, self.selected_year);
-        metric(ui, cards[0], "GIOCATORI ADESSO", &metrics.live, Some(GREEN));
-        metric(ui, cards[1], "MEDIA SETTIMANALE", &metrics.week, None);
-        metric(ui, cards[2], "MEDIA MENSILE", &metrics.month, None);
-        metric(ui, cards[3], "MEDIA ANNUALE", &metrics.year, None);
+        metric(ui, cards[0], "PLAYERS NOW", &metrics.live, Some(GREEN));
+        metric(ui, cards[1], "WEEKLY AVERAGE", &metrics.week, None);
+        metric(ui, cards[2], "MONTHLY AVERAGE", &metrics.month, None);
+        metric(ui, cards[3], "YEARLY AVERAGE", &metrics.year, None);
 
         let month_rect = Rect::from_min_size(
             cards[2].min + vec2(16.0, 31.0),
@@ -444,16 +514,34 @@ impl SteamCounterApp {
             &mut self.range,
             self.selected_month,
             self.selected_year,
+            data.history.as_ref(),
+            data.demo,
         );
         let bottom = pos2(rect.left(), rect.bottom() - 7.0);
         let status = if data.demo {
-            "Anteprima interfaccia · tutti i numeri sono dimostrativi".to_owned()
+            "Demo mode · all numbers are examples".to_owned()
         } else {
-            format!(
-                "Steam + SteamCharts   ·   AppID {}   ·   {} UTC",
-                data.appid,
-                data.updated_at.format("%H:%M")
-            )
+            let history = data
+                .history
+                .as_ref()
+                .map(|history| {
+                    format!(
+                        "History {} {} UTC",
+                        match history.cache_state {
+                            CacheState::Network => "fetched",
+                            CacheState::Fresh => "cached",
+                            CacheState::Stale => "stale",
+                        },
+                        history.retrieved_at.format("%d %b %H:%M")
+                    )
+                })
+                .unwrap_or_else(|| "History unavailable".to_owned());
+            let live = data
+                .current
+                .as_ref()
+                .map(|current| format!("Steam {} UTC", current.checked_at.format("%H:%M")))
+                .unwrap_or_else(|| "Steam unavailable".to_owned());
+            format!("AppID {}  ·  {live}  ·  {history}", data.appid)
         };
         ui.painter().circle_filled(
             bottom + vec2(3.0, -5.0),
@@ -468,9 +556,9 @@ impl SteamCounterApp {
             MUTED,
         );
         let note = if data.warnings.is_empty() {
-            "~ valori stimati"
+            "~ estimated values"
         } else {
-            "Dati parziali (i)"
+            "Partial data (i)"
         };
         let note_rect =
             Rect::from_min_max(pos2(rect.right() - 150.0, rect.bottom() - 28.0), rect.max);
@@ -481,7 +569,13 @@ impl SteamCounterApp {
             FontId::proportional(11.0),
             if data.warnings.is_empty() { DIM } else { AMBER },
         );
-        ui.interact(note_rect, ui.id().with("data_warnings"), Sense::hover()).on_hover_text(if data.warnings.is_empty() { "Le medie contrassegnate da ~ sono stime. Passa sui riquadri per vedere copertura e periodo.".to_owned() } else { data.warnings.join("\n\n") });
+        ui.interact(note_rect, ui.id().with("data_warnings"), Sense::hover())
+            .on_hover_text(if data.warnings.is_empty() {
+                "Averages marked ~ are estimates. Hover over a card for its period and coverage."
+                    .to_owned()
+            } else {
+                data.warnings.join("\n\n")
+            });
     }
 
     fn intermediate(&mut self, ui: &mut Ui, rect: Rect, ctx: &Context) {
@@ -494,7 +588,7 @@ impl SteamCounterApp {
             ui.painter().text(
                 center + vec2(0.0, 48.0),
                 Align2::CENTER_CENTER,
-                "Recupero giocatori e medie…",
+                "Loading players and averages…",
                 FontId::proportional(16.0),
                 MUTED,
             );
@@ -504,7 +598,11 @@ impl SteamCounterApp {
                 Rect::from_center_size(rect.center(), vec2(620.0, rect.height().min(350.0)));
             let mut choice = None;
             ui.scope_builder(UiBuilder::new().max_rect(panel), |ui| {
-                ui.label(RichText::new("Quale gioco cercavi?").size(23.0).strong());
+                ui.label(
+                    RichText::new("Which game did you mean?")
+                        .size(23.0)
+                        .strong(),
+                );
                 ui.add_space(8.0);
                 // Il pannello principale non scorre; solo una lista ambigua puo scorrere.
                 egui::ScrollArea::vertical()
@@ -535,7 +633,7 @@ impl SteamCounterApp {
                     .layout(Layout::top_down(Align::Center)),
                 |ui| {
                     ui.label(
-                        RichText::new("Non riesco a trovare questi dati")
+                        RichText::new("These data are unavailable")
                             .size(24.0)
                             .color(WHITE),
                     );
@@ -543,13 +641,68 @@ impl SteamCounterApp {
                     ui.label(RichText::new(error).size(14.0).color(MUTED));
                     ui.add_space(14.0);
                     ui.label(
-                        RichText::new("Prova il nome completo oppure l'AppID del gioco.")
+                        RichText::new("Try the full game name or its AppID.")
                             .size(13.0)
                             .color(ACCENT),
                     );
                 },
             );
         }
+    }
+
+    fn settings_button(&mut self, ui: &mut Ui, rect: Rect) {
+        if ui
+            .put(
+                rect,
+                egui::Button::new(RichText::new("Settings").size(12.0).color(SOFT)).fill(PANEL),
+            )
+            .clicked()
+        {
+            self.settings_open = !self.settings_open;
+            self.cache_size = HistoryCache::new(true)
+                .and_then(|cache| cache.size_bytes())
+                .unwrap_or(0);
+        }
+    }
+
+    fn settings_window(&mut self, ctx: &Context) {
+        let mut open = self.settings_open;
+        egui::Window::new("Settings").open(&mut open).collapsible(false).resizable(false)
+            .default_width(410.0).anchor(Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+                ui.label(RichText::new("Local history").size(18.0).strong());
+                ui.add_space(8.0);
+                let old = self.settings.cache_enabled;
+                if ui.add_enabled(self.pending_requests == 0, egui::Checkbox::new(&mut self.settings.cache_enabled, "Save history on this computer")).changed() {
+                    match self.settings.save() {
+                        Ok(()) => self.settings_message = Some("Saved. Applies to your next search.".to_owned()),
+                        Err(error) => { self.settings.cache_enabled = old; self.settings_message = Some(format!("Could not save settings: {error:#}")); }
+                    }
+                }
+                ui.add_space(8.0);
+                ui.label(RichText::new("Reuse charts and averages for one hour, including after restarting the app. A failed refresh can use older saved history, clearly marked as stale.").color(MUTED));
+                ui.add_space(8.0);
+                ui.label(RichText::new("Steam counts are reused for up to 60 seconds in this session. Changing chart periods makes no network requests.").color(MUTED));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    ui.label(format!("Cache: {:.1} MiB / 50 MiB", self.cache_size as f64 / 1_048_576.0));
+                    if ui.add_enabled(self.pending_requests == 0, egui::Button::new("Clear cache")).clicked() {
+                        match HistoryCache::new(true).and_then(|cache| cache.clear()) {
+                            Ok(()) => { self.cache_size = 0; self.settings_message = Some("Saved history cleared.".to_owned()); }
+                            Err(error) => self.settings_message = Some(format!("Could not clear cache: {error:#}")),
+                        }
+                    }
+                });
+                ui.label(RichText::new("Oldest entries are removed at the size limit. Disabling the option stops cache use; Clear cache deletes saved history.").size(12.0).color(MUTED));
+                if let Ok(path) = crate::cache::data_dir() {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(path.display().to_string()).size(11.0).color(DIM));
+                }
+                if self.pending_requests > 0 { ui.label(RichText::new("Wait for the current search to finish before changing storage.").color(AMBER)); }
+                if let Some(message) = &self.settings_message { ui.add_space(8.0); ui.label(RichText::new(message).size(12.0).color(ACCENT)); }
+                ui.add_space(12.0);
+                ui.label(RichText::new(format!("SteamCounter {} · Steam + SteamCharts", env!("CARGO_PKG_VERSION"))).size(11.0).color(DIM));
+            });
+        self.settings_open = open;
     }
 }
 
@@ -581,6 +734,11 @@ impl eframe::App for SteamCounterApp {
                     self.intermediate(ui, body, ctx);
                 }
             });
+        self.settings_window(ctx);
+        #[cfg(feature = "gui-preview")]
+        if let Some(preview) = &mut self.preview {
+            preview.update(ctx, self.busy);
+        }
     }
 }
 

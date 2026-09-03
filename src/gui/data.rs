@@ -1,12 +1,20 @@
-use std::{collections::BTreeSet, num::NonZeroU32, sync::mpsc::Sender, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    num::NonZeroU32,
+    sync::{Arc, Mutex, mpsc::Sender},
+    time::{Duration, Instant},
+};
 
 use anyhow::{Result, bail};
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use eframe::egui::Context;
 
 use super::style::number;
-use crate::history::{HistorySnapshot, MonthlyAverage, SteamChartsClient};
 use crate::{Game, GameQuery, NameMatch, PlayerSnapshot, SteamClient, match_name};
+use crate::{
+    cache::HistoryCache,
+    history::{HistorySnapshot, MonthlyAverage, SteamChartsClient},
+};
 
 pub struct WorkerMessage {
     pub id: u64,
@@ -24,8 +32,53 @@ pub struct DashboardData {
     pub current: Option<PlayerSnapshot>,
     pub history: Option<HistorySnapshot>,
     pub warnings: Vec<String>,
-    pub updated_at: DateTime<Utc>,
     pub demo: bool,
+}
+
+#[derive(Default)]
+pub struct Session {
+    searches: HashMap<String, (Instant, Vec<Game>)>,
+    live: HashMap<NonZeroU32, PlayerSnapshot>,
+}
+
+impl Session {
+    fn search(&mut self, steam: &SteamClient, query: &str) -> Result<Vec<Game>> {
+        let key = query.trim().to_lowercase();
+        if let Some((at, games)) = self.searches.get(&key)
+            && at.elapsed() < Duration::from_secs(24 * 3600)
+        {
+            return Ok(games.clone());
+        }
+        let games = steam.search(query)?;
+        if self.searches.len() >= 128 {
+            self.searches.clear();
+        }
+        self.searches.insert(key, (Instant::now(), games.clone()));
+        Ok(games)
+    }
+    fn snapshot(
+        &mut self,
+        steam: &SteamClient,
+        appid: NonZeroU32,
+        name: Option<String>,
+    ) -> Result<PlayerSnapshot> {
+        if let Some(snapshot) = self.live.get(&appid)
+            && Utc::now().signed_duration_since(snapshot.checked_at) < chrono::Duration::minutes(1)
+        {
+            return Ok(snapshot.clone());
+        }
+        let name = name.or_else(|| {
+            self.live
+                .get(&appid)
+                .and_then(|snapshot| snapshot.name.clone())
+        });
+        let snapshot = steam.snapshot(appid, name)?;
+        if self.live.len() >= 128 {
+            self.live.clear();
+        }
+        self.live.insert(appid, snapshot.clone());
+        Ok(snapshot)
+    }
 }
 
 pub fn spawn(
@@ -34,46 +87,59 @@ pub fn spawn(
     selected: Option<Game>,
     sender: Sender<WorkerMessage>,
     ctx: Context,
+    cache: HistoryCache,
+    session: Arc<Mutex<Session>>,
 ) {
     // Tutte le richieste bloccanti restano fuori dal thread della finestra.
     std::thread::spawn(move || {
-        let result = load(query, selected).map_err(|error| format!("{error:#}"));
+        let result = session
+            .lock()
+            .map_err(|_| {
+                anyhow::anyhow!("The request worker is unavailable. Restart SteamCounter.")
+            })
+            .and_then(|mut session| load(query, selected, cache, &mut session))
+            .map_err(|error| format!("{error:#}"));
         let _ = sender.send(WorkerMessage { id, result });
         ctx.request_repaint();
     });
 }
 
-fn load(query: String, selected: Option<Game>) -> Result<Loaded> {
+fn load(
+    query: String,
+    selected: Option<Game>,
+    cache: HistoryCache,
+    session: &mut Session,
+) -> Result<Loaded> {
     let steam = SteamClient::new(Duration::from_secs(15))?;
     let (appid, known_name) = if let Some(game) = selected {
         (game.appid, Some(game.name))
     } else {
         match GameQuery::parse(&query)? {
             GameQuery::AppId(appid) => (appid, None),
-            GameQuery::Name(name) => match match_name(&name, steam.search(&name)?) {
+            GameQuery::Name(name) => match match_name(&name, session.search(&steam, &name)?) {
                 NameMatch::Found(game) => (game.appid, Some(game.name)),
                 NameMatch::Ambiguous(games) => return Ok(Loaded::Candidates(games)),
-                NameMatch::NotFound => bail!("Nessun gioco trovato per «{name}»."),
+                NameMatch::NotFound => bail!("No game found for “{name}”."),
             },
         }
     };
     let mut warnings = Vec::new();
-    let current = match steam.snapshot(appid, known_name.clone()) {
+    let current = match session.snapshot(&steam, appid, known_name.clone()) {
         Ok(value) => Some(value),
         Err(error) => {
-            warnings.push(format!("Conteggio attuale non disponibile: {error:#}"));
+            warnings.push(format!("Current count unavailable: {error:#}"));
             None
         }
     };
     let history = match SteamChartsClient::new(Duration::from_secs(15))
-        .and_then(|client| client.history(appid))
+        .and_then(|client| client.history_cached(appid, &cache))
     {
         Ok(value) => {
             warnings.extend(value.warnings.clone());
             Some(value)
         }
         Err(error) => {
-            warnings.push(format!("Storico non disponibile: {error:#}"));
+            warnings.push(format!("History unavailable: {error:#}"));
             None
         }
     };
@@ -91,7 +157,6 @@ fn load(query: String, selected: Option<Game>) -> Result<Loaded> {
         current,
         history,
         warnings,
-        updated_at: Utc::now(),
         demo: false,
     })))
 }
@@ -137,7 +202,6 @@ impl DashboardData {
             current: None,
             history: None,
             warnings: Vec::new(),
-            updated_at: Utc::now(),
             demo: true,
         }
     }
@@ -179,30 +243,30 @@ impl DashboardData {
                 live: Metric::new(
                     Some(1_093_369.0),
                     false,
-                    "In questo momento",
-                    "Media oggi ~782.410",
-                    "Dati dimostrativi: nessuna richiesta di rete.",
+                    "Right now",
+                    "Today avg ~782,410",
+                    "Example data: no network requests.",
                 ),
                 week: Metric::new(
                     Some(814_343.0),
                     true,
-                    "Ultimi 7 giorni",
-                    "Media · copertura 99%",
-                    "Dati dimostrativi.",
+                    "Last 7 days",
+                    "Average · 99% coverage",
+                    "Example data.",
                 ),
                 month: Metric::new(
                     Some(737_670.0 + (month.month() as f64 - Utc::now().month() as f64) * 4513.0),
                     true,
                     "",
-                    "Media · mese selezionato",
-                    "Dati dimostrativi.",
+                    "Selected month average",
+                    "Example data.",
                 ),
                 year: Metric::new(
                     Some(990_170.0 + (year - Utc::now().year()) as f64 * 9852.0),
                     true,
                     "",
-                    "Media provvisoria",
-                    "Dati dimostrativi.",
+                    "Provisional average",
+                    "Example data.",
                 ),
             };
         }
@@ -211,23 +275,23 @@ impl DashboardData {
         let live = Metric::new(
             self.current.as_ref().map(|value| value.player_count as f64),
             false,
-            "In questo momento",
+            "Right now",
             today
-                .map(|value| format!("Media oggi ~{}", number(value)))
-                .unwrap_or_else(|| "Media oggi non disponibile".to_owned()),
+                .map(|value| format!("Today avg ~{}", number(value)))
+                .unwrap_or_else(|| "Today avg unavailable".to_owned()),
             format!(
-                "Giocatori contemporanei: dato attuale da Steam. La media di oggi usa campioni SteamCharts da mezzanotte UTC. Copertura: {:.1}%.",
+                "Concurrent players: latest count from Steam, reused for up to 60 seconds. Today's average uses SteamCharts samples since midnight UTC. Coverage: {:.1}%.",
                 history.map_or(0.0, |h| h.today.coverage_percent)
             ),
         );
         let week = Metric::new(
             history.and_then(|h| h.last_7_days.average_players),
             true,
-            "Ultimi 7 giorni",
+            "Last 7 days",
             history
-                .map(|h| format!("Copertura {:.1}%", h.last_7_days.coverage_percent))
-                .unwrap_or_else(|| "Storico non disponibile".to_owned()),
-            "Stima sui campioni orari degli ultimi 7 giorni. I buchi non sono considerati zero.",
+                .map(|h| format!("Coverage {:.1}%", h.last_7_days.coverage_percent))
+                .unwrap_or_else(|| "History unavailable".to_owned()),
+            "Estimate from hourly samples over the last 7 days. Missing intervals are not treated as zero.",
         );
         let monthly = if let Some(h) = history {
             if month == h.current_month.starts_at.date_naive() {
@@ -236,18 +300,18 @@ impl DashboardData {
                     true,
                     "",
                     format!(
-                        "In corso · copertura {:.1}%",
+                        "In progress · {:.1}% coverage",
                         h.current_month.coverage_percent
                     ),
-                    "Media del mese corrente, dal primo del mese UTC, sul tempo coperto dai campioni. Non equivale agli ultimi 30 giorni.",
+                    "Average since the first of this month UTC, over time covered by samples. This is not the last 30 days.",
                 )
             } else {
                 Metric::new(
                     h.month(month).map(|row| row.players.average_players),
                     false,
                     "",
-                    "Media pubblicata",
-                    "Media mensile pubblicata da SteamCharts.",
+                    "Published average",
+                    "Monthly average published by SteamCharts.",
                 )
             }
         } else {
@@ -255,8 +319,8 @@ impl DashboardData {
                 None,
                 false,
                 "",
-                "Storico non disponibile",
-                "La fonte storica non ha risposto.",
+                "History unavailable",
+                "The historical data source did not respond.",
             )
         };
         let annual = if let Some(h) = history {
@@ -266,8 +330,8 @@ impl DashboardData {
                     average,
                     true,
                     "",
-                    format!("Provvisoria · {count} mesi conclusi"),
-                    "Anno in corso: media ponderata per i giorni dei soli mesi conclusi disponibili. Non include il mese corrente e non e una media annuale completa.",
+                    format!("Provisional · {count} full months"),
+                    "Current year: day-weighted average of available completed months. Excludes the current month; this is not a full-year average.",
                 )
             } else {
                 let average = h.year(year);
@@ -275,8 +339,8 @@ impl DashboardData {
                     average.average_players,
                     true,
                     "",
-                    format!("{} / 12 mesi disponibili", average.months_available),
-                    "Stima annuale ponderata per i giorni dei mesi. Richiede tutti i 12 mesi.",
+                    format!("{} / 12 months available", average.months_available),
+                    "Yearly estimate weighted by calendar days. Requires all 12 months.",
                 )
             }
         } else {
@@ -284,8 +348,8 @@ impl DashboardData {
                 None,
                 false,
                 "",
-                "Storico non disponibile",
-                "La fonte storica non ha risposto.",
+                "History unavailable",
+                "The historical data source did not respond.",
             )
         };
         Metrics {
