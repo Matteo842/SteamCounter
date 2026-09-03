@@ -243,12 +243,20 @@ pub fn draw(
         } else {
             sample.at.format("%B %Y").to_string()
         };
-        hover.on_hover_text(format!(
-            "{time}\n{}: {}{}",
-            series.label(),
-            number(sample.value),
-            if demo { " (demo)" } else { "" }
-        ));
+        egui::show_tooltip_for(
+            ui.ctx(),
+            ui.layer_id(),
+            hover.id,
+            &Rect::from_center_size(*point, vec2(24.0, 24.0)),
+            |ui| {
+                ui.label(format!(
+                    "{time}\n{}: {}{}",
+                    series.label(),
+                    number(sample.value),
+                    if demo { " (demo)" } else { "" }
+                ));
+            },
+        );
     }
     draw_overview(
         ui,

@@ -256,8 +256,8 @@ impl SteamCounterApp {
             Stroke::new(1.6, MUTED),
         );
         let inner = Rect::from_min_max(
-            pos2(edit_rect.left() + 43.0, edit_rect.center().y - 12.0),
-            pos2(edit_rect.right() - 12.0, edit_rect.center().y + 13.0),
+            pos2(edit_rect.left() + 43.0, edit_rect.top()),
+            pos2(edit_rect.right() - 12.0, edit_rect.bottom()),
         );
         let response = ui.put(
             inner,
@@ -271,6 +271,8 @@ impl SteamCounterApp {
                 .font(FontId::proportional(if large { 17.0 } else { 14.0 }))
                 .margin(Vec2::ZERO)
                 .frame(false)
+                .min_size(inner.size())
+                .vertical_align(Align::Center)
                 .desired_width(inner.width()),
         );
         if self.focus_search {
