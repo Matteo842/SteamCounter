@@ -23,7 +23,7 @@ const PLAYERS_URL: &str =
 const SEARCH_URL: &str = "https://store.steampowered.com/api/storesearch/";
 const DETAILS_URL: &str = "https://store.steampowered.com/api/appdetails";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Game {
     pub appid: NonZeroU32,
     pub name: String,

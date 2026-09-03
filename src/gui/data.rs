@@ -199,6 +199,7 @@ pub struct Metrics {
 }
 
 impl DashboardData {
+    #[cfg(feature = "gui-preview")]
     pub fn demo() -> Self {
         Self {
             appid: NonZeroU32::new(730).unwrap(),

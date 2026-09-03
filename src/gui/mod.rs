@@ -30,8 +30,9 @@ use style::*;
 #[derive(Parser)]
 #[command(name = "steamcounter-gui", version, about = "SteamCounter desktop")]
 struct Options {
-    /// Open an offline demo with example data
-    #[arg(long)]
+    /// Open an offline development preview with example data
+    #[cfg(feature = "gui-preview")]
+    #[arg(long, hide = true)]
     demo: bool,
     /// Search for a game on startup
     #[arg(long)]
@@ -137,9 +138,13 @@ impl SteamCounterApp {
             #[cfg(feature = "gui-preview")]
             preview: preview::Capture::from_env(),
         };
+        #[cfg(feature = "gui-preview")]
         if options.demo {
             app.open_demo();
-        } else if let Some(game) = options.game {
+        }
+        if !app.has_searched
+            && let Some(game) = options.game
+        {
             app.query = game;
             app.search(ctx, None);
         }
@@ -172,6 +177,7 @@ impl SteamCounterApp {
         app
     }
 
+    #[cfg(feature = "gui-preview")]
     fn open_demo(&mut self) {
         self.request_id += 1;
         self.has_searched = true;
@@ -247,7 +253,24 @@ impl SteamCounterApp {
         }
         self.busy = false;
         match message.result {
-            Ok(Loaded::Dashboard(data)) => self.data = Some(*data),
+            Ok(Loaded::Dashboard(data)) => {
+                self.settings
+                    .recent_games
+                    .retain(|game| game.appid != data.appid);
+                self.settings.recent_games.insert(
+                    0,
+                    Game {
+                        appid: data.appid,
+                        name: data.name.clone(),
+                    },
+                );
+                self.settings.recent_games.truncate(3);
+                if let Err(error) = self.settings.save() {
+                    self.settings_message =
+                        Some(format!("Could not save recent searches: {error:#}"));
+                }
+                self.data = Some(*data);
+            }
             Ok(Loaded::Candidates(games)) => self.candidates = games,
             Err(error) => self.error = Some(error),
         }
@@ -342,54 +365,53 @@ impl SteamCounterApp {
         if self.search_field(ui, search, true) {
             self.search(ctx, None);
         }
-        let games = ["Counter-Strike 2", "Dota 2", "ELDEN RING"];
-        let examples_width = ui.fonts(|fonts| {
-            std::iter::once("Try")
-                .chain(games)
-                .map(|label| {
-                    fonts
-                        .layout_no_wrap(label.to_owned(), FontId::proportional(12.0), SOFT)
-                        .size()
-                        .x
-                })
-                .sum::<f32>()
-        }) + 6.0 * ui.spacing().button_padding.x
-            + 3.0 * ui.spacing().item_spacing.x;
-        let examples =
-            Rect::from_center_size(pos2(center.x, center.y + 91.0), vec2(examples_width, 32.0));
+        let has_recent = !self.settings.recent_games.is_empty();
+        let games: Vec<(String, Option<Game>)> = if has_recent {
+            self.settings
+                .recent_games
+                .iter()
+                .take(3)
+                .map(|game| (game.name.clone(), Some(game.clone())))
+                .collect()
+        } else {
+            ["Counter-Strike 2", "Dota 2", "ELDEN RING"]
+                .into_iter()
+                .map(|name| (name.to_owned(), None))
+                .collect()
+        };
+        let row_width = (48.0 + games.len() as f32 * 182.0).min(content_width);
+        let button_width = (row_width - 48.0) / games.len() as f32 - 8.0;
+        let shortcuts =
+            Rect::from_center_size(pos2(center.x, center.y + 91.0), vec2(row_width, 32.0));
         ui.scope_builder(
             UiBuilder::new()
-                .max_rect(examples)
+                .max_rect(shortcuts)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
-                ui.label(RichText::new("Try").size(12.0).color(MUTED));
-                for game in games {
+                ui.label(
+                    RichText::new(if has_recent { "Last" } else { "Try" })
+                        .size(12.0)
+                        .color(MUTED),
+                );
+                for (name, game) in games {
                     if ui
-                        .add(
-                            egui::Button::new(RichText::new(game).size(12.0).color(SOFT))
+                        .add_sized(
+                            [button_width, 28.0],
+                            egui::Button::new(RichText::new(&name).size(12.0).color(SOFT))
+                                .truncate()
                                 .fill(PANEL)
                                 .stroke(Stroke::new(1.0, BORDER))
                                 .rounding(5.0),
                         )
+                        .on_hover_text(&name)
                         .clicked()
                     {
-                        self.query = game.to_owned();
-                        self.search(ctx, None);
+                        self.query = name;
+                        self.search(ctx, game);
                     }
                 }
             },
         );
-        let demo = Rect::from_center_size(pos2(center.x, center.y + 144.0), vec2(220.0, 28.0));
-        if ui
-            .put(
-                demo,
-                egui::Button::new(RichText::new("Explore the demo").size(13.0).color(ACCENT))
-                    .frame(false),
-            )
-            .clicked()
-        {
-            self.open_demo();
-        }
         ui.painter().text(
             pos2(rect.center().x, rect.bottom() - 6.0),
             Align2::CENTER_BOTTOM,

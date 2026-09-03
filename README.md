@@ -19,7 +19,7 @@ Windows x64 is the tested release platform. Rust and build tools are only needed
 - For an older month without hourly detail, the chart shows a single bar for its **published monthly average**. It does not invent a daily curve. The source exposes only about 30 recent days of hourly samples; part of a selected month may be missing.
 - Current-year averages are provisional and include only available completed months, weighted by their number of days. The card reports how many months are included. Previous years require all 12 months.
 - Open **Settings** to control local history storage. Click the SteamCounter name to return to the home screen.
-- **Explore the demo** is explicitly marked and contains example numbers. Normal searches contain real data.
+- After your first successful search, the home shortcuts show **Last**: your three most recently opened games, newest first and without duplicates. Names and AppIDs are saved in settings across restarts, independently of the optional statistics cache.
 
 ## Optional local cache
 
@@ -103,7 +103,7 @@ cargo test --features gui --locked
 cargo clippy --features gui --all-targets --locked -- -D warnings
 ```
 
-`target` holds compilation artifacts; these are not required to run the portable binaries. `cargo run --features gui --bin steamcounter-gui -- --demo` opens the offline demo; `--game 730` loads a game immediately.
+`target` holds compilation artifacts; these are not required to run the portable binaries. `--game 730` loads a game immediately. Demo mode is available only in development builds with the `gui-preview` feature; it is not part of the release app.
 
 The clients are in `src/lib.rs` and `src/history.rs`; cache/settings in `src/cache.rs`; timestamp-aware chart series in `src/series.rs`; CLI in `src/main.rs`; native UI in `src/gui/`. Tests use local HTTP fixtures and synthetic data, including cache expiry, failure fallback, corrupt files, storage limits, missing intervals and monthly averages versus peaks.
 

@@ -45,6 +45,8 @@ pub enum CacheState {
 pub struct Settings {
     #[serde(default)]
     pub cache_enabled: bool,
+    #[serde(default)]
+    pub recent_games: Vec<crate::Game>,
 }
 
 pub fn data_dir() -> Result<PathBuf> {
