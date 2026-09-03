@@ -6,9 +6,9 @@ A lightweight Rust desktop app and CLI for Steam player counts, real charts and 
 
 ## Download
 
-Get the Windows x64 portable ZIP from [Releases](https://github.com/Matteo842/SteamCounter/releases/latest), extract it and open **steamcounter-gui.exe**. The separate **steamcounter.exe** is the command-line app. Keep the included third-party notices with redistributed copies.
+Download **SteamCounter-1.0.0-windows-x64.exe** from [Releases](https://github.com/Matteo842/SteamCounter/releases/latest) and run it. It is a single portable desktop executable: no ZIP, installer or accompanying files are needed. License texts and dependency notices are embedded and available under **Settings → View licenses**.
 
-Windows x64 is the tested release platform. The binaries are portable; Rust and build tools are only needed to compile the source. These executables are not code-signed.
+Windows x64 is the tested release platform. Rust and build tools are only needed to compile the source. The executable is not code-signed. GitHub also provides automatic source-code archives; those are for developers and are not required to run the app.
 
 ## Desktop
 
@@ -41,6 +41,8 @@ On Windows, data lives in `%LOCALAPPDATA%\SteamCounter`: `settings.json` stores 
 Turning the option off stops cache reads and writes on subsequent requests. **Clear cache** deletes saved history while keeping the preference. An unwritable cache produces a warning and does not discard successfully fetched data. Nothing is uploaded from the cache.
 
 ## Command line
+
+The CLI remains available in the source. Build it with `cargo build --release --locked --bin steamcounter`, then use `target/release/steamcounter.exe`. The downloadable release executable opens the desktop UI.
 
 ```powershell
 .\steamcounter.exe 730
@@ -105,6 +107,16 @@ cargo clippy --features gui --all-targets --locked -- -D warnings
 
 The clients are in `src/lib.rs` and `src/history.rs`; cache/settings in `src/cache.rs`; timestamp-aware chart series in `src/series.rs`; CLI in `src/main.rs`; native UI in `src/gui/`. Tests use local HTTP fixtures and synthetic data, including cache expiry, failure fallback, corrupt files, storage limits, missing intervals and monthly averages versus peaks.
 
-After a release build, `./scripts/package-windows.ps1` creates the portable ZIP and SHA-256 checksum under `target/packages`, including dependency notices, font licenses and unmodified MPL-covered sources. Packaging requires PowerShell 7 and ripgrep; neither is needed to run the app.
+`./scripts/package-windows.ps1` regenerates the embedded dependency notices, builds both binaries and copies the standalone GUI executable to `target/packages/SteamCounter-1.0.0-windows-x64.exe`. It prints a SHA-256 digest for the release notes; only the `.exe` is uploaded as a release asset. Packaging requires PowerShell 7, ripgrep and dependencies already fetched by Cargo (`cargo fetch --locked`); none are needed to run the app. Close any running copy from `target/release` before rebuilding.
 
-For native screenshots, build with `--features gui-preview --bin steamcounter-gui` and set `STEAMCOUNTER_SCREENSHOT_TO` to a PNG path. The app exits after capture and waits for `--game` results and layout first. `--compact`, `--preview-range 1y`, `--preview-month YYYY-MM`, `--preview-year YYYY` and `--preview-settings` are development preview options.
+When changing dependencies, run `./scripts/generate-notices.ps1` before building a release. The script includes runtime and build dependencies for Windows and deduplicates identical license texts. Notices are committed so ordinary source builds do not require PowerShell.
+
+For native screenshots, build with `--features gui-preview --bin steamcounter-gui` and set `STEAMCOUNTER_SCREENSHOT_TO` to a PNG path. The app exits after capture and waits for `--game` results and layout first. `--compact`, `--preview-range 1y`, `--preview-month YYYY-MM`, `--preview-year YYYY`, `--preview-settings` and `--preview-licenses gpl` (or `third-party`) are development preview options.
+
+## License and source code
+
+Copyright © 2026 Matteo842. SteamCounter's original code and documentation are licensed under **GNU GPL version 3 or, at your option, any later version** (`GPL-3.0-or-later`). See [LICENSE](LICENSE). SteamCounter is distributed without any warranty, including implied warranties of merchantability or fitness for a particular purpose.
+
+You may use, modify and redistribute SteamCounter, including commercially, under those terms. When distributing a covered modified version, preserve the license and notices and provide its corresponding source under the GPL. Dependencies, fonts and other third-party materials retain their respective license terms; see [third-party notices](docs/third-party/THIRD_PARTY_NOTICES.txt).
+
+The corresponding SteamCounter source and build scripts for each executable are in its matching Git tag, including `Cargo.lock`. The [dependency source index](docs/third-party/SOURCES.md) links the exact unmodified source archives for runtime and build dependencies; Cargo verifies their checksums from the lockfile. MPL-covered dependency archives are also mirrored under `docs/third-party/sources` and additionally distributed under GPL-3.0-or-later as part of the combined work, pursuant to MPL section 3.3. Original MPL notices and rights are preserved. The program's license does not grant rights to Steam or SteamCharts data or trademarks.

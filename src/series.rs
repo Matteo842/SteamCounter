@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Matteo842
+// See LICENSE in the project root for the full terms.
+
 //! Chart data preserves source timestamps and gaps. Monthly means are not hourly counts.
 use crate::history::HistorySnapshot;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};

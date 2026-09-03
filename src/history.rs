@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Matteo842
+// See LICENSE in the project root for the full terms.
+
 //! Statistiche su richiesta da SteamCharts: nessun database o processo in background.
 //!
 //! Gli endpoint pubblici non costituiscono un'API stabile. La tabella contiene medie

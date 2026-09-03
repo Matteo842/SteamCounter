@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Matteo842
+// See LICENSE in the project root for the full terms.
+
 use chrono::{Datelike, NaiveDate};
 use eframe::egui::{
     self, Align2, Color32, Context, FontId, Pos2, Rect, Stroke, TextStyle, Ui, vec2,

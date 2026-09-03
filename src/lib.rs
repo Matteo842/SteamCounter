@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Matteo842
+// See LICENSE in the project root for the full terms.
+
 //! Accesso a Steam separato dalla CLI, riutilizzabile per storico e interfacce future.
 
 pub mod cache;

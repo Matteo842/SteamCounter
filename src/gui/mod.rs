@@ -1,5 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Matteo842
+// See LICENSE in the project root for the full terms.
+
 mod chart;
 mod data;
+mod licenses;
 #[cfg(feature = "gui-preview")]
 mod preview;
 mod style;
@@ -45,6 +50,9 @@ struct Options {
     #[cfg(feature = "gui-preview")]
     #[arg(long, hide = true)]
     preview_settings: bool,
+    #[cfg(feature = "gui-preview")]
+    #[arg(long, hide = true, value_parser = ["gpl", "third-party"])]
+    preview_licenses: Option<String>,
 }
 
 pub fn run() -> eframe::Result {
@@ -87,6 +95,7 @@ struct SteamCounterApp {
     receiver: mpsc::Receiver<WorkerMessage>,
     settings: Settings,
     settings_open: bool,
+    licenses: licenses::LicenseViewer,
     settings_message: Option<String>,
     cache_size: u64,
     session: Arc<Mutex<data::Session>>,
@@ -120,6 +129,7 @@ impl SteamCounterApp {
             receiver,
             settings,
             settings_open: false,
+            licenses: licenses::LicenseViewer::default(),
             settings_message,
             cache_size: 0,
             session: Arc::new(Mutex::new(data::Session::default())),
@@ -150,6 +160,9 @@ impl SteamCounterApp {
                 };
             }
             app.settings_open = options.preview_settings;
+            if let Some(licenses) = options.preview_licenses {
+                app.licenses.open(licenses == "third-party");
+            }
             if app.settings_open {
                 app.cache_size = HistoryCache::new(true)
                     .and_then(|cache| cache.size_bytes())
@@ -703,6 +716,9 @@ impl SteamCounterApp {
                 if let Some(message) = &self.settings_message { ui.add_space(8.0); ui.label(RichText::new(message).size(12.0).color(ACCENT)); }
                 ui.add_space(12.0);
                 ui.label(RichText::new(format!("SteamCounter {} · Steam + SteamCharts", env!("CARGO_PKG_VERSION"))).size(11.0).color(DIM));
+                if ui.button("View licenses").clicked() {
+                    self.licenses.open(false);
+                }
             });
         self.settings_open = open;
     }
@@ -737,6 +753,7 @@ impl eframe::App for SteamCounterApp {
                 }
             });
         self.settings_window(ctx);
+        self.licenses.show(ctx);
         #[cfg(feature = "gui-preview")]
         if let Some(preview) = &mut self.preview {
             preview.update(ctx, self.busy);

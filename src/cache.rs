@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Matteo842
+// See LICENSE in the project root for the full terms.
+
 //! Opt-in, bounded local history cache. Files are replaced atomically.
 use std::{
     fs,

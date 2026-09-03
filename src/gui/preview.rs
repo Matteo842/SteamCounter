@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Matteo842
+// See LICENSE in the project root for the full terms.
+
 //! Development-only screenshots of the actual native renderer, after layout settles.
 use eframe::egui::{Context, Event, ViewportCommand};
 use std::path::PathBuf;
