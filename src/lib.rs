@@ -2,6 +2,9 @@
 
 pub mod history;
 
+#[cfg(feature = "gui")]
+pub mod gui;
+
 use std::{collections::HashMap, num::NonZeroU32, time::Duration};
 
 use anyhow::{Context, Result, bail};

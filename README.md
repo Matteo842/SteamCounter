@@ -1,6 +1,37 @@
 # SteamCounter
 
-Una piccola CLI in Rust per leggere **quanti giocatori sono attivi adesso in un gioco Steam**, partendo dal nome o dall'AppID. Con `--stats` aggiunge le medie da SteamCharts. Non servono account, chiavi API, browser, database o un server sempre acceso.
+Un piccolo programma in Rust per leggere **quanti giocatori sono attivi adesso in un gioco Steam**, partendo dal nome o dall'AppID, e consultare le medie da SteamCharts. Si usa dalla CLI oppure da una finestra desktop nativa. Non servono account, chiavi API, browser, database o un server sempre acceso.
+
+## Interfaccia desktop
+
+La UI usa **egui/eframe 0.29.1**, come il progetto Backlog, con una palette blu notte e azzurro. La ricerca parte al centro; dopo l'invio rimane in alto a destra, accanto al titolo del gioco. Una finestra da 1060 × 740 contiene riquadri e grafico senza scorrere; la dimensione minima è 900 × 640.
+
+```powershell
+cargo run --features gui --bin steamcounter-gui
+cargo build --release --locked --features gui --bins
+.\target\release\steamcounter-gui.exe
+```
+
+L'eseguibile `steamcounter-gui.exe` si può aprire con un doppio clic, senza console. Anche la CLI `steamcounter.exe` resta disponibile. Le dipendenze grafiche sono opzionali: i normali comandi `cargo run -- ...` e `cargo build --release` continuano a compilare solo la CLI.
+
+- Cerca per nome o AppID e premi Invio o **Cerca**. Se ci sono più risultati, scegli il gioco dalla lista.
+- I riquadri mostrano giocatori adesso, media di oggi, ultimi 7 giorni, mese e anno. I menu partono dal mese e dall'anno correnti e permettono di consultare i periodi disponibili.
+- Nell'anno corrente la UI mostra una **media provvisoria dei soli mesi conclusi disponibili**, ponderata per i giorni. Il riquadro indica quanti mesi sono inclusi. Per gli anni passati occorrono tutti i 12 mesi; un valore mancante appare come `—`.
+- Le ricerche avvengono in background; una fonte non disponibile lascia consultabili i dati dell'altra. Passando sui riquadri e sugli avvisi si leggono dettagli e copertura.
+- Il grafico è per ora un **mockup interattivo**, indicato come **Anteprima grafico**: i tasti 48h, 1w, 1m e 1y cambiano la curva dimostrativa. Non è ancora collegato allo storico del gioco. I riquadri, dopo una ricerca, usano dati reali.
+
+Per provare il layout anche senza Internet, usa **Esplora l'anteprima** nella schermata iniziale oppure:
+
+```powershell
+.\target\release\steamcounter-gui.exe --demo
+.\target\release\steamcounter-gui.exe --game "elden ring"
+```
+
+In modalità demo **tutti** i numeri sono esempi. Nessun dato viene scaricato o salvato. Clicca sul nome SteamCounter in alto a sinistra per tornare alla ricerca iniziale.
+
+Schermate della finestra: [ricerca iniziale](docs/previews/home.png) e dashboard in modalità demo:
+
+![Dashboard SteamCounter con dati dimostrativi](docs/previews/dashboard.png)
 
 ## Avvio rapido
 
@@ -64,7 +95,7 @@ Le stime sono indicate con `~`. Per giorno, settimana e mese corrente mostriamo 
 
 Il grafico SteamCharts contiene circa 30 giorni di campioni orari recenti e picchi aggregati per i periodi piu vecchi. Questi picchi non sono medie: il programma li esclude dai calcoli. Si tratta di un formato non documentato come API stabile; i risultati recenti sono stime, non le medie ufficiali di SteamCharts. Il 31 del mese i primi campioni del mese possono gia essere fuori dalla finestra disponibile: la copertura lo segnala.
 
-La media annuale viene mostrata soltanto con tutti i 12 mesi presenti ed e comunque una stima: le medie mensili pubblicate sono arrotondate e non dichiarano il numero di campioni sottostanti. Un anno incompleto, compreso quello in corso, risulta non disponibile; non viene sostituito con una media di pochi mesi.
+Nella CLI la media annuale viene mostrata soltanto con tutti i 12 mesi presenti ed e comunque una stima: le medie mensili pubblicate sono arrotondate e non dichiarano il numero di campioni sottostanti. Un anno incompleto, compreso quello in corso, risulta non disponibile. La UI aggiunge un riepilogo provvisorio dell'anno corrente, esplicitamente distinto dalla media di un anno completo.
 
 Il conteggio live non e una media giornaliera. Per avere una media giornaliera pronta senza tenere acceso il programma, anche questa viene ricavata dai campioni di SteamCharts. Non raccogliamo dati in background.
 
@@ -114,10 +145,14 @@ Gli errori fatali vanno su stderr e producono un codice di uscita diverso da zer
 cargo fmt --check
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
+cargo test --features gui --locked
+cargo clippy --features gui --all-targets --locked -- -D warnings
 ```
 
 I test usano risposte HTTP locali e dati sintetici: verificano ricerca e selezione del titolo, conteggi, JSON, AppID non validi, errori delle fonti, parsing delle medie, esclusione dei picchi, copertura temporale e ponderazione annuale senza dipendere da Internet.
 
-Il client Steam e il modello `PlayerSnapshot` sono in `src/lib.rs`; il provider SteamCharts e in `src/history.rs`; la presentazione e gli argomenti sono in `src/main.rs`. Questa separazione consente di riutilizzare i dati nella futura UI egui/eframe.
+Il client Steam e il modello `PlayerSnapshot` sono in `src/lib.rs`; il provider SteamCharts e in `src/history.rs`; la CLI è in `src/main.rs`. La UI è in `src/gui/` e riusa gli stessi client: `mod.rs` gestisce finestra e ricerca, `data.rs` carica e presenta le statistiche, `style.rs` definisce il tema e `chart.rs` disegna il grafico dimostrativo. Non vengono aggiunti browser incorporati o servizi locali.
+
+Per acquisire schermate della UI durante lo sviluppo, compila con `--features gui-preview --bin steamcounter-gui` e imposta `EFRAME_SCREENSHOT_TO` al percorso del PNG. La finestra si chiude dopo l'acquisizione; con `--game` attende il risultato della ricerca. L'opzione `--compact` permette di controllare il layout alla dimensione minima. Queste acquisizioni usano il rendering della finestra nativa.
 
 La direzione del progetto e una piccola applicazione locale che interroga fonti esistenti. Non e necessario costruire un servizio di raccolta o replicare il database di SteamDB. Un eventuale provider API documentato puo essere aggiunto in futuro mantenendo esplicita la provenienza delle medie.
