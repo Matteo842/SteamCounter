@@ -15,6 +15,8 @@ fn help_is_available_without_network() {
     assert!(help.contains("steamcounter 730"));
     assert!(help.contains("--json"));
     assert!(help.contains("--search"));
+    assert!(help.contains("--stats"));
+    assert!(help.contains("--month"));
 }
 
 #[test]
@@ -26,6 +28,12 @@ fn invalid_input_fails_without_writing_json_to_stdout() {
         vec![" ", "--json"],
         vec!["730", "--timeout", "0"],
         vec!["730", "--timeout", "121"],
+        vec!["730", "--month", "2026-13"],
+        vec!["730", "--month", "2026-8"],
+        vec!["730", "--month", "2026-08-01"],
+        vec!["730", "--year", "2000"],
+        vec!["portal", "--search", "--stats"],
+        vec!["portal", "--search", "--month", "2026-08"],
     ] {
         let output = cli(&args);
         assert!(!output.status.success(), "{args:?}");

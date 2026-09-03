@@ -1,5 +1,7 @@
 //! Accesso a Steam separato dalla CLI, riutilizzabile per storico e interfacce future.
 
+pub mod history;
+
 use std::{collections::HashMap, num::NonZeroU32, time::Duration};
 
 use anyhow::{Context, Result, bail};

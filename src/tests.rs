@@ -8,7 +8,9 @@ use std::{
 use super::*;
 
 // Risposte HTTP locali: i test non dipendono da Internet o da conteggi variabili.
-fn fixture(responses: Vec<(&'static str, u16, &'static str)>) -> (SteamClient, JoinHandle<()>) {
+pub(super) fn fixture(
+    responses: Vec<(&'static str, u16, &'static str)>,
+) -> (SteamClient, JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
