@@ -6,12 +6,16 @@ Verified on September 3, 2026. SteamCounter fetches data for a requested game wi
 
 | Source | Finding |
 | --- | --- |
-| Steam | Public `GetNumberOfCurrentPlayers` supplies the current concurrent-player count, not historical averages. |
+| Steam | Public `GetNumberOfCurrentPlayers` supplies the current concurrent-player count, not historical averages. Store metadata supplies the game name and header banner used by the desktop UI. |
 | SteamCharts | Public game page and chart JSON work without login. The page supplies completed-month averages; the graph supplies recent hourly counts mixed with historical peaks. |
 | SteamDB | Its FAQ does not offer an applicable public API and disallows scraping/crawling. Not used. |
 | OpenGameStats | Historical API requires a personal key (the tested unauthenticated request returned HTTP 401). Not integrated. |
 
 References: [Valve](https://partner.steamgames.com/doc/webapi/ISteamUserStats#GetNumberOfCurrentPlayers), [SteamCharts About](https://steamcharts.com/about), [SteamDB FAQ](https://steamdb.info/faq/), [OpenGameStats historical API](https://opengamestats.com/en-US/blog/historical-steam-data-api).
+
+The desktop app uses Steam Store metadata to keep only entries whose application type is `game`; DLC, demos, soundtracks and other non-standalone AppIDs are omitted from name-search results. Type checks are performed off the UI thread and cached in memory for the session. Unverified entries are never shown as games; direct AppID input remains available if Store metadata is temporarily unavailable.
+
+The desktop app also requests the selected game's header-image URL from Store metadata and downloads only that image, capped at 8 MiB. It is decoded off the UI thread, retained only in memory for the current session and omitted without affecting statistics if unavailable.
 
 ## SteamCharts requests
 

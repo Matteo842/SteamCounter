@@ -53,17 +53,16 @@ impl LicenseViewer {
                 ui.horizontal_wrapped(|ui| {
                     ui.hyperlink_to(
                         "Source code",
-                        concat!(
-                            "https://github.com/Matteo842/SteamCounter/tree/v",
-                            env!("CARGO_PKG_VERSION")
+                        format!(
+                            "https://github.com/Matteo842/SteamCounter/tree/v{}",
+                            crate::DISPLAY_VERSION
                         ),
                     );
                     ui.hyperlink_to(
                         "Dependency sources",
-                        concat!(
-                            "https://github.com/Matteo842/SteamCounter/blob/v",
-                            env!("CARGO_PKG_VERSION"),
-                            "/docs/third-party/SOURCES.md"
+                        format!(
+                            "https://github.com/Matteo842/SteamCounter/blob/v{}/docs/third-party/SOURCES.md",
+                            crate::DISPLAY_VERSION
                         ),
                     );
                 });

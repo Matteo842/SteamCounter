@@ -11,7 +11,7 @@ use std::{
 
 use anyhow::{Result, bail};
 use chrono::{Datelike, NaiveDate, Utc};
-use eframe::egui::Context;
+use eframe::egui::{ColorImage, Context};
 
 use super::style::number;
 use crate::{Game, GameQuery, NameMatch, PlayerSnapshot, SteamClient, match_name};
@@ -25,6 +25,12 @@ pub struct WorkerMessage {
     pub result: Result<Loaded, String>,
 }
 
+pub struct SuggestionMessage {
+    pub id: u64,
+    pub query: String,
+    pub result: Result<Vec<Game>, String>,
+}
+
 pub enum Loaded {
     Dashboard(Box<DashboardData>),
     Candidates(Vec<Game>),
@@ -33,6 +39,7 @@ pub enum Loaded {
 pub struct DashboardData {
     pub appid: NonZeroU32,
     pub name: String,
+    pub banner: Option<ColorImage>,
     pub current: Option<PlayerSnapshot>,
     pub history: Option<HistorySnapshot>,
     pub warnings: Vec<String>,
@@ -43,6 +50,8 @@ pub struct DashboardData {
 pub struct Session {
     searches: HashMap<String, (Instant, Vec<Game>)>,
     live: HashMap<NonZeroU32, PlayerSnapshot>,
+    banners: HashMap<NonZeroU32, ColorImage>,
+    standalone: HashMap<NonZeroU32, bool>,
 }
 
 impl Session {
@@ -54,11 +63,67 @@ impl Session {
             return Ok(games.clone());
         }
         let games = steam.search(query)?;
+        let games = self.filter_standalone(steam, games)?;
         if self.searches.len() >= 128 {
             self.searches.clear();
         }
         self.searches.insert(key, (Instant::now(), games.clone()));
         Ok(games)
+    }
+
+    fn standalone_status(&mut self, steam: &SteamClient, appid: NonZeroU32) -> Option<bool> {
+        if let Some(standalone) = self.standalone.get(&appid) {
+            return Some(*standalone);
+        }
+        let standalone = steam.is_standalone(appid).ok().flatten()?;
+        if self.standalone.len() >= 512 {
+            self.standalone.clear();
+        }
+        self.standalone.insert(appid, standalone);
+        Some(standalone)
+    }
+
+    fn filter_standalone(&mut self, steam: &SteamClient, games: Vec<Game>) -> Result<Vec<Game>> {
+        const MAX_RESULTS: usize = 12;
+
+        let candidates: Vec<_> = games.into_iter().take(MAX_RESULTS).collect();
+        let unknown: Vec<_> = candidates
+            .iter()
+            .map(|game| game.appid)
+            .filter(|appid| !self.standalone.contains_key(appid))
+            .collect();
+        let checked = std::thread::scope(|scope| {
+            let handles: Vec<_> = unknown
+                .into_iter()
+                .map(|appid| {
+                    scope.spawn(move || (appid, steam.is_standalone(appid).ok().flatten()))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok())
+                .collect::<Vec<_>>()
+        });
+        let resolved = checked
+            .iter()
+            .filter(|(_, standalone)| standalone.is_some())
+            .count();
+        for (appid, standalone) in checked {
+            if let Some(standalone) = standalone {
+                if self.standalone.len() >= 512 {
+                    self.standalone.clear();
+                }
+                self.standalone.insert(appid, standalone);
+            }
+        }
+
+        if resolved == 0 && !candidates.is_empty() {
+            bail!("Steam Store metadata is unavailable, so search results could not be verified.");
+        }
+        Ok(candidates
+            .into_iter()
+            .filter(|game| self.standalone.get(&game.appid).copied() == Some(true))
+            .collect())
     }
     fn snapshot(
         &mut self,
@@ -82,6 +147,21 @@ impl Session {
         }
         self.live.insert(appid, snapshot.clone());
         Ok(snapshot)
+    }
+
+    fn banner(&mut self, steam: &SteamClient, appid: NonZeroU32) -> Option<ColorImage> {
+        if let Some(image) = self.banners.get(&appid) {
+            return Some(image.clone());
+        }
+        let bytes = steam.header_image(appid).ok().flatten()?;
+        let decoded = image::load_from_memory(&bytes).ok()?.into_rgba8();
+        let size = [decoded.width() as usize, decoded.height() as usize];
+        let image = ColorImage::from_rgba_unmultiplied(size, decoded.as_raw());
+        if self.banners.len() >= 32 {
+            self.banners.clear();
+        }
+        self.banners.insert(appid, image.clone());
+        Some(image)
     }
 }
 
@@ -108,6 +188,29 @@ pub fn spawn(
     });
 }
 
+pub fn spawn_suggestions(
+    id: u64,
+    query: String,
+    sender: Sender<SuggestionMessage>,
+    ctx: Context,
+    session: Arc<Mutex<Session>>,
+) {
+    std::thread::spawn(move || {
+        let result = SteamClient::new(Duration::from_secs(8))
+            .and_then(|steam| {
+                session
+                    .lock()
+                    .map_err(|_| {
+                        anyhow::anyhow!("The search worker is unavailable. Restart SteamCounter.")
+                    })
+                    .and_then(|mut session| session.search(&steam, &query))
+            })
+            .map_err(|error| format!("{error:#}"));
+        let _ = sender.send(SuggestionMessage { id, query, result });
+        ctx.request_repaint();
+    });
+}
+
 fn load(
     query: String,
     selected: Option<Game>,
@@ -127,6 +230,15 @@ fn load(
             },
         }
     };
+    if session.standalone_status(&steam, appid) == Some(false) {
+        let label = known_name
+            .as_deref()
+            .map(|name| format!("“{name}”"))
+            .unwrap_or_else(|| format!("AppID {appid}"));
+        bail!(
+            "{label} is downloadable content, not a standalone game. Search for its base game instead."
+        );
+    }
     let mut warnings = Vec::new();
     let current = match session.snapshot(&steam, appid, known_name.clone()) {
         Ok(value) => Some(value),
@@ -147,6 +259,7 @@ fn load(
             None
         }
     };
+    let banner = session.banner(&steam, appid);
     if current.is_none() && history.is_none() {
         bail!("{}", warnings.join("\n"));
     }
@@ -158,6 +271,7 @@ fn load(
     Ok(Loaded::Dashboard(Box::new(DashboardData {
         appid,
         name,
+        banner,
         current,
         history,
         warnings,
@@ -204,6 +318,7 @@ impl DashboardData {
         Self {
             appid: NonZeroU32::new(730).unwrap(),
             name: "Counter-Strike 2".to_owned(),
+            banner: None,
             current: None,
             history: None,
             warnings: Vec::new(),

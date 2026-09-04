@@ -11,7 +11,7 @@ mod style;
 
 use std::{
     sync::{Arc, Mutex, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use chrono::{Datelike, NaiveDate, Utc};
@@ -24,11 +24,15 @@ use eframe::egui::{
 use crate::Game;
 use crate::cache::{CacheState, HistoryCache, Settings};
 use chart::ChartRange;
-use data::{DashboardData, Loaded, WorkerMessage};
+use data::{DashboardData, Loaded, SuggestionMessage, WorkerMessage};
 use style::*;
 
 #[derive(Parser)]
-#[command(name = "steamcounter-gui", version, about = "SteamCounter desktop")]
+#[command(
+    name = "steamcounter-gui",
+    version = crate::DISPLAY_VERSION,
+    about = "SteamCounter desktop"
+)]
 struct Options {
     /// Open an offline development preview with example data
     #[cfg(feature = "gui-preview")]
@@ -54,6 +58,9 @@ struct Options {
     #[cfg(feature = "gui-preview")]
     #[arg(long, hide = true, value_parser = ["gpl", "third-party"])]
     preview_licenses: Option<String>,
+    #[cfg(feature = "gui-preview")]
+    #[arg(long, hide = true)]
+    preview_query: Option<String>,
 }
 
 pub fn run() -> eframe::Result {
@@ -86,6 +93,7 @@ struct SteamCounterApp {
     focus_search: bool,
     busy: bool,
     data: Option<DashboardData>,
+    banner_texture: Option<egui::TextureHandle>,
     candidates: Vec<Game>,
     error: Option<String>,
     selected_month: NaiveDate,
@@ -94,6 +102,15 @@ struct SteamCounterApp {
     request_id: u64,
     sender: mpsc::Sender<WorkerMessage>,
     receiver: mpsc::Receiver<WorkerMessage>,
+    suggestion_id: u64,
+    suggestion_sender: mpsc::Sender<SuggestionMessage>,
+    suggestion_receiver: mpsc::Receiver<SuggestionMessage>,
+    suggestion_due: Option<Instant>,
+    suggestion_in_flight: bool,
+    suggestions: Vec<Game>,
+    suggestion_error: bool,
+    suggestion_open: bool,
+    suggestion_anchor: Option<Rect>,
     settings: Settings,
     settings_open: bool,
     licenses: licenses::LicenseViewer,
@@ -110,6 +127,7 @@ impl SteamCounterApp {
         configure(ctx);
         let now = Utc::now();
         let (sender, receiver) = mpsc::channel();
+        let (suggestion_sender, suggestion_receiver) = mpsc::channel();
         let (settings, settings_message) = match Settings::load() {
             Ok(settings) => (settings, None),
             Err(error) => (Settings::default(), Some(format!("{error:#}"))),
@@ -120,6 +138,7 @@ impl SteamCounterApp {
             focus_search: true,
             busy: false,
             data: None,
+            banner_texture: None,
             candidates: Vec::new(),
             error: None,
             selected_month: NaiveDate::from_ymd_opt(now.year(), now.month(), 1).unwrap(),
@@ -128,6 +147,15 @@ impl SteamCounterApp {
             request_id: 0,
             sender,
             receiver,
+            suggestion_id: 0,
+            suggestion_sender,
+            suggestion_receiver,
+            suggestion_due: None,
+            suggestion_in_flight: false,
+            suggestions: Vec::new(),
+            suggestion_error: false,
+            suggestion_open: false,
+            suggestion_anchor: None,
             settings,
             settings_open: false,
             licenses: licenses::LicenseViewer::default(),
@@ -168,6 +196,10 @@ impl SteamCounterApp {
             if let Some(licenses) = options.preview_licenses {
                 app.licenses.open(licenses == "third-party");
             }
+            if let Some(query) = options.preview_query {
+                app.query = query;
+                app.query_changed(ctx);
+            }
             if app.settings_open {
                 app.cache_size = HistoryCache::new(true)
                     .and_then(|cache| cache.size_bytes())
@@ -177,14 +209,192 @@ impl SteamCounterApp {
         app
     }
 
+    fn dismiss_suggestions(&mut self) {
+        self.suggestion_id = self.suggestion_id.wrapping_add(1);
+        self.suggestion_due = None;
+        self.suggestions.clear();
+        self.suggestion_error = false;
+        self.suggestion_open = false;
+        self.suggestion_anchor = None;
+    }
+
+    fn query_changed(&mut self, ctx: &Context) {
+        self.dismiss_suggestions();
+        if !self.query.trim().is_empty() {
+            let delay = Duration::from_millis(300);
+            self.suggestion_due = Some(Instant::now() + delay);
+            self.suggestion_open = true;
+            ctx.request_repaint_after(delay);
+        }
+    }
+
+    fn update_suggestions(&mut self, ctx: &Context) {
+        while let Ok(message) = self.suggestion_receiver.try_recv() {
+            self.suggestion_in_flight = false;
+            if message.id != self.suggestion_id || message.query != self.query.trim() {
+                continue;
+            }
+            self.suggestion_due = None;
+            match message.result {
+                Ok(games) => {
+                    self.suggestions = games;
+                    self.suggestion_error = false;
+                }
+                Err(_) => {
+                    self.suggestions.clear();
+                    self.suggestion_error = true;
+                }
+            }
+        }
+
+        if ctx.input(|input| input.key_pressed(Key::Escape)) {
+            self.dismiss_suggestions();
+            return;
+        }
+        let Some(due) = self.suggestion_due else {
+            return;
+        };
+        if self.suggestion_in_flight {
+            return;
+        }
+        let now = Instant::now();
+        if now < due {
+            ctx.request_repaint_after(due - now);
+            return;
+        }
+
+        let query = self.query.trim().to_owned();
+        if query.is_empty() {
+            self.dismiss_suggestions();
+            return;
+        }
+        self.suggestion_due = None;
+        self.suggestion_in_flight = true;
+        data::spawn_suggestions(
+            self.suggestion_id,
+            query,
+            self.suggestion_sender.clone(),
+            ctx.clone(),
+            self.session.clone(),
+        );
+    }
+
+    fn suggestions_popup(&mut self, ctx: &Context) {
+        let Some(anchor) = self.suggestion_anchor else {
+            return;
+        };
+        if !self.suggestion_open || self.query.trim().is_empty() || self.busy {
+            return;
+        }
+
+        let loading = self.suggestion_due.is_some() || self.suggestion_in_flight;
+        let popup_width = if anchor.width() < 400.0 {
+            430.0
+        } else {
+            anchor.width()
+        };
+        let mut selected = None;
+        egui::Area::new(egui::Id::new("search_suggestions"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos2(anchor.right() - popup_width, anchor.bottom() + 6.0))
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(PANEL)
+                    .stroke(Stroke::new(1.0, BORDER))
+                    .rounding(7.0)
+                    .inner_margin(egui::Margin::same(6.0))
+                    .show(ui, |ui| {
+                        ui.set_width(popup_width - 12.0);
+                        if loading && self.suggestions.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Spinner::new().color(ACCENT));
+                                ui.label(RichText::new("Searching Steam…").size(12.0).color(MUTED));
+                            });
+                        } else if self.suggestion_error {
+                            ui.label(
+                                RichText::new("Suggestions unavailable · press Enter")
+                                    .size(12.0)
+                                    .color(AMBER),
+                            );
+                        } else if self.suggestions.is_empty() {
+                            ui.label(
+                                RichText::new("No games found · press Enter to retry")
+                                    .size(12.0)
+                                    .color(MUTED),
+                            );
+                        } else {
+                            for game in self.suggestions.iter().take(6) {
+                                let (row, response) = ui.allocate_exact_size(
+                                    vec2(ui.available_width(), 36.0),
+                                    Sense::click(),
+                                );
+                                let hovered = response.hovered();
+                                ui.painter().rect(
+                                    row,
+                                    5.0,
+                                    if hovered { BORDER } else { INPUT },
+                                    Stroke::NONE,
+                                );
+                                let appid = format!("AppID {}", game.appid);
+                                let appid_galley = ui.painter().layout_no_wrap(
+                                    appid,
+                                    FontId::proportional(11.0),
+                                    DIM,
+                                );
+                                let name_clip = Rect::from_min_max(
+                                    row.min + vec2(12.0, 0.0),
+                                    pos2(row.right() - appid_galley.size().x - 24.0, row.bottom()),
+                                );
+                                ui.painter().with_clip_rect(name_clip).text(
+                                    row.left_center() + vec2(12.0, 0.0),
+                                    Align2::LEFT_CENTER,
+                                    &game.name,
+                                    FontId::proportional(13.0),
+                                    if hovered { WHITE } else { SOFT },
+                                );
+                                ui.painter().galley(
+                                    pos2(
+                                        row.right() - appid_galley.size().x - 10.0,
+                                        row.center().y - appid_galley.size().y / 2.0,
+                                    ),
+                                    appid_galley,
+                                    DIM,
+                                );
+                                if response
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text(&game.name)
+                                    .clicked()
+                                {
+                                    selected = Some(game.clone());
+                                }
+                            }
+                            if loading {
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Spinner::new().color(ACCENT));
+                                    ui.label(RichText::new("Updating…").size(11.0).color(DIM));
+                                });
+                            }
+                        }
+                    });
+            });
+
+        if let Some(game) = selected {
+            self.query = game.name.clone();
+            self.dismiss_suggestions();
+            self.search(ctx, Some(game));
+        }
+    }
+
     #[cfg(feature = "gui-preview")]
     fn open_demo(&mut self) {
+        self.dismiss_suggestions();
         self.request_id += 1;
         self.has_searched = true;
         self.focus_search = false;
         self.busy = false;
         self.error = None;
         self.candidates.clear();
+        self.banner_texture = None;
         self.data = Some(DashboardData::demo());
         self.query.clear();
         let now = Utc::now();
@@ -194,11 +404,13 @@ impl SteamCounterApp {
     }
 
     fn home(&mut self) {
+        self.dismiss_suggestions();
         self.request_id += 1;
         self.has_searched = false;
         self.focus_search = true;
         self.busy = false;
         self.data = None;
+        self.banner_texture = None;
         self.candidates.clear();
         self.error = None;
         self.query.clear();
@@ -211,12 +423,14 @@ impl SteamCounterApp {
         if self.query.trim().is_empty() && selected.is_none() {
             return;
         }
+        self.dismiss_suggestions();
         self.request_id += 1;
         self.has_searched = true;
         self.focus_search = false;
         self.busy = true;
         self.pending_requests += 1;
         self.data = None;
+        self.banner_texture = None;
         self.candidates.clear();
         self.error = None;
         let now = Utc::now();
@@ -240,20 +454,20 @@ impl SteamCounterApp {
         );
     }
 
-    fn receive(&mut self) {
+    fn receive(&mut self, ctx: &Context) {
         while let Ok(message) = self.receiver.try_recv() {
-            self.apply_message(message);
+            self.apply_message(ctx, message);
         }
     }
 
-    fn apply_message(&mut self, message: WorkerMessage) {
+    fn apply_message(&mut self, ctx: &Context, message: WorkerMessage) {
         self.pending_requests = self.pending_requests.saturating_sub(1);
         if message.id != self.request_id {
             return;
         }
         self.busy = false;
         match message.result {
-            Ok(Loaded::Dashboard(data)) => {
+            Ok(Loaded::Dashboard(mut data)) => {
                 self.settings
                     .recent_games
                     .retain(|game| game.appid != data.appid);
@@ -269,6 +483,13 @@ impl SteamCounterApp {
                     self.settings_message =
                         Some(format!("Could not save recent searches: {error:#}"));
                 }
+                self.banner_texture = data.banner.take().map(|image| {
+                    ctx.load_texture(
+                        format!("game-banner-{}", data.appid),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    )
+                });
                 self.data = Some(*data);
             }
             Ok(Loaded::Candidates(games)) => self.candidates = games,
@@ -276,7 +497,7 @@ impl SteamCounterApp {
         }
     }
 
-    fn search_field(&mut self, ui: &mut Ui, rect: Rect, large: bool) -> bool {
+    fn search_field(&mut self, ui: &mut Ui, rect: Rect, large: bool) -> (bool, bool) {
         let edit_rect = rect;
         ui.painter()
             .rect(edit_rect, 7.0, INPUT, Stroke::new(1.0, BORDER));
@@ -346,8 +567,9 @@ impl SteamCounterApp {
             ],
             enter_stroke,
         );
+        let changed = response.changed();
         let enter = response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
-        enter && !self.query.trim().is_empty()
+        (enter && !self.query.trim().is_empty(), changed)
     }
 
     fn welcome(&mut self, ui: &mut Ui, rect: Rect, ctx: &Context) {
@@ -373,7 +595,12 @@ impl SteamCounterApp {
             MUTED,
         );
         let search = Rect::from_center_size(pos2(center.x, center.y), vec2(content_width, 56.0));
-        if self.search_field(ui, search, true) {
+        let (submitted, changed) = self.search_field(ui, search, true);
+        self.suggestion_anchor = Some(search);
+        if changed {
+            self.query_changed(ctx);
+        }
+        if submitted {
             self.search(ctx, None);
         }
         let has_recent = !self.settings.recent_games.is_empty();
@@ -433,17 +660,45 @@ impl SteamCounterApp {
     }
 
     fn header(&mut self, ui: &mut Ui, rect: Rect, ctx: &Context) {
-        let home = Rect::from_min_size(rect.min, vec2(184.0, 25.0));
-        brand(ui, home.min, 12.0);
-        if self.data.as_ref().is_some_and(|data| data.demo) {
-            ui.painter().text(
-                rect.min + vec2(170.0, 12.0),
-                Align2::LEFT_CENTER,
-                "DEMO",
-                FontId::proportional(10.0),
-                ACCENT,
+        let compact = rect.width() < 940.0;
+        let banner_size = if compact {
+            vec2(184.0, 86.0)
+        } else {
+            vec2(216.0, 101.0)
+        };
+        let banner_rect = Rect::from_min_size(rect.min, banner_size);
+        if let Some(texture) = &self.banner_texture {
+            ui.put(
+                banner_rect,
+                egui::Image::new(texture)
+                    .fit_to_exact_size(banner_size)
+                    .rounding(8.0),
             );
+            ui.painter()
+                .rect_stroke(banner_rect, 8.0, Stroke::new(1.0, BORDER));
+            if let Some(data) = &self.data {
+                ui.interact(banner_rect, ui.id().with("game_banner"), Sense::hover())
+                    .on_hover_text(&data.name);
+            }
+        } else if self.data.is_some() {
+            ui.painter()
+                .rect(banner_rect, 8.0, INPUT, Stroke::new(1.0, BORDER));
+            let center = banner_rect.center();
+            ui.painter()
+                .circle_stroke(center - vec2(13.0, 4.0), 7.0, Stroke::new(1.5, DIM));
+            ui.painter().add(egui::Shape::line(
+                vec![
+                    center - vec2(30.0, -17.0),
+                    center - vec2(12.0, 2.0),
+                    center + vec2(0.0, -9.0),
+                    center + vec2(30.0, 18.0),
+                ],
+                Stroke::new(1.5, DIM),
+            ));
         }
+
+        let home = centered_brand(ui, pos2(rect.center().x, rect.top() + 21.0), 12.0)
+            .expand2(vec2(10.0, 6.0));
         if ui
             .interact(home, ui.id().with("home"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -453,40 +708,35 @@ impl SteamCounterApp {
             self.home();
             return;
         }
-        let search_width = if rect.width() < 940.0 { 300.0 } else { 342.0 };
+        let search_width = if compact { 270.0 } else { 342.0 };
         self.settings_button(
             ui,
             Rect::from_min_size(
-                pos2(rect.right() - 34.0, rect.top() + 16.0),
+                pos2(rect.right() - 34.0, rect.top() + 4.0),
                 vec2(34.0, 34.0),
             ),
         );
         let search = Rect::from_min_size(
-            pos2(rect.right() - 48.0 - search_width, rect.top() + 12.0),
+            pos2(rect.right() - 48.0 - search_width, rect.top()),
             vec2(search_width, 42.0),
         );
-        if self.search_field(ui, search, false) {
+        let (submitted, changed) = self.search_field(ui, search, false);
+        self.suggestion_anchor = Some(search);
+        if changed {
+            self.query_changed(ctx);
+        }
+        if submitted {
             self.search(ctx, None);
         }
-        let title = self
-            .data
-            .as_ref()
-            .map(|data| data.name.as_str())
-            .unwrap_or(if self.busy {
-                "Finding your game…"
-            } else {
-                "Find your game"
-            });
-        let title_rect = Rect::from_min_max(
-            pos2(rect.left(), rect.top() + 32.0),
-            pos2(search.left() - 22.0, rect.top() + 71.0),
-        );
-        ui.scope_builder(UiBuilder::new().max_rect(title_rect), |ui| {
-            ui.add(
-                egui::Label::new(RichText::new(title).size(28.0).strong().color(WHITE)).truncate(),
-            )
-            .on_hover_text(title);
-        });
+        if self.data.as_ref().is_some_and(|data| data.demo) {
+            ui.painter().text(
+                pos2(banner_rect.right() + 10.0, banner_rect.bottom() - 2.0),
+                Align2::LEFT_BOTTOM,
+                "DEMO",
+                FontId::proportional(10.0),
+                ACCENT,
+            );
+        }
     }
 
     fn dashboard(&mut self, ui: &mut Ui, rect: Rect) {
@@ -721,6 +971,7 @@ impl SteamCounterApp {
             );
         }
         if response.clicked() {
+            self.dismiss_suggestions();
             self.settings_open = !self.settings_open;
             self.cache_size = HistoryCache::new(true)
                 .and_then(|cache| cache.size_bytes())
@@ -763,7 +1014,14 @@ impl SteamCounterApp {
                 if self.pending_requests > 0 { ui.label(RichText::new("Wait for the current search to finish before changing storage.").color(AMBER)); }
                 if let Some(message) = &self.settings_message { ui.add_space(8.0); ui.label(RichText::new(message).size(12.0).color(ACCENT)); }
                 ui.add_space(12.0);
-                ui.label(RichText::new(format!("SteamCounter {} · Steam + SteamCharts", env!("CARGO_PKG_VERSION"))).size(11.0).color(DIM));
+                ui.label(
+                    RichText::new(format!(
+                        "SteamCounter {} · Steam + SteamCharts",
+                        crate::DISPLAY_VERSION
+                    ))
+                    .size(11.0)
+                    .color(DIM),
+                );
                 if ui.button("View licenses").clicked() {
                     self.licenses.open(false);
                 }
@@ -774,7 +1032,9 @@ impl SteamCounterApp {
 
 impl eframe::App for SteamCounterApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        self.receive();
+        self.receive(ctx);
+        self.update_suggestions(ctx);
+        self.suggestion_anchor = None;
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
@@ -787,7 +1047,7 @@ impl eframe::App for SteamCounterApp {
                     self.welcome(ui, rect, ctx);
                     return;
                 }
-                let header = Rect::from_min_size(rect.min, vec2(rect.width(), 76.0));
+                let header = Rect::from_min_size(rect.min, vec2(rect.width(), 101.0));
                 self.header(ui, header, ctx);
                 if !self.has_searched {
                     ctx.request_repaint();
@@ -800,11 +1060,15 @@ impl eframe::App for SteamCounterApp {
                     self.intermediate(ui, body, ctx);
                 }
             });
+        self.suggestions_popup(ctx);
         self.settings_window(ctx);
         self.licenses.show(ctx);
         #[cfg(feature = "gui-preview")]
         if let Some(preview) = &mut self.preview {
-            preview.update(ctx, self.busy);
+            preview.update(
+                ctx,
+                self.busy || self.suggestion_due.is_some() || self.suggestion_in_flight,
+            );
         }
     }
 }

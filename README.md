@@ -6,13 +6,16 @@ A lightweight Rust desktop app and CLI for Steam player counts, real charts and 
 
 ## Download
 
-Download **SteamCounter-1.0.0-windows-x64.exe** from [Releases](https://github.com/Matteo842/SteamCounter/releases/latest) and run it. It is a single portable desktop executable: no ZIP, installer or accompanying files are needed. License texts and dependency notices are embedded and available under **Settings → View licenses**.
+Download **SteamCounter-1.1-windows-x64.exe** from [Releases](https://github.com/Matteo842/SteamCounter/releases/latest) and run it. It is a single portable desktop executable: no ZIP, installer or accompanying files are needed. License texts and dependency notices are embedded and available under **Settings → View licenses**.
 
 Windows x64 is the tested release platform. Rust and build tools are only needed to compile the source. The executable is not code-signed. GitHub also provides automatic source-code archives; those are for developers and are not required to run the app.
 
 ## Desktop
 
-- Type a game name or its Steam AppID and press **Enter** or **Search**. Ambiguous searches show a list of matches.
+- Type a game name or its Steam AppID and press **Enter**. Ambiguous searches show a list of matches.
+- Search suggestions appear after a short pause while typing. Only standalone games are shown; DLC, demos, soundtracks and other non-game AppIDs are excluded using Steam Store metadata.
+- Only one autocomplete search runs at a time. Repeated queries and previously checked AppID types reuse the in-memory session cache.
+- The dashboard header shows the game's official Steam banner while keeping SteamCounter centered and the controls on the right.
 - View players now, today's estimated average, the last 7 days, a selected month and a selected year. Month and year default to the current period.
 - Switch between **48h**, **1w**, **1m** and **1y** without making additional requests. Hover over a chart point for its timestamp and value.
 - The recent chart uses actual hourly player counts from SteamCharts. The yearly chart uses **published monthly averages**, not peaks. Missing hours and months remain empty.
@@ -30,7 +33,8 @@ Enable **Settings → Save history on this computer** to reuse fetched charts an
 | SteamCharts history | Saved locally and reused for one hour when enabled |
 | Published months / yearly calculations | Included in the same history snapshot; changing selections makes no requests |
 | Steam current count | Reused for up to 60 seconds in the current GUI session |
-| Name searches | Reused in memory for up to 24 hours in the current GUI session |
+| Name searches | Debounced by 300 ms, limited to one active search and reused in memory for up to 24 hours in the current GUI session |
+| Standalone/DLC classification | Checked once per previously unseen search result and reused for the current GUI session |
 
 After expiry, history refreshes on the next search. If a refresh fails, saved history remains available and is clearly marked **stale**, with its original timestamp and a warning. Failed history requests are paused for at least 15 minutes when caching is enabled; a longer provider retry interval is respected. This reduces requests but cannot guarantee exemption from a provider's rate limits.
 
@@ -107,11 +111,11 @@ cargo clippy --features gui --all-targets --locked -- -D warnings
 
 The clients are in `src/lib.rs` and `src/history.rs`; cache/settings in `src/cache.rs`; timestamp-aware chart series in `src/series.rs`; CLI in `src/main.rs`; native UI in `src/gui/`. Tests use local HTTP fixtures and synthetic data, including cache expiry, failure fallback, corrupt files, storage limits, missing intervals and monthly averages versus peaks.
 
-`./scripts/package-windows.ps1` regenerates the embedded dependency notices, builds both binaries and copies the standalone GUI executable to `target/packages/SteamCounter-1.0.0-windows-x64.exe`. It prints a SHA-256 digest for the release notes; only the `.exe` is uploaded as a release asset. Packaging requires PowerShell 7, ripgrep and dependencies already fetched by Cargo (`cargo fetch --locked`); none are needed to run the app. Close any running copy from `target/release` before rebuilding.
+`./scripts/package-windows.ps1` regenerates the embedded dependency notices, builds both binaries and copies the standalone GUI executable to `target/packages/SteamCounter-1.1-windows-x64.exe`. It prints a SHA-256 digest for the release notes; only the `.exe` is uploaded as a release asset. Packaging requires PowerShell 7, ripgrep and dependencies already fetched by Cargo (`cargo fetch --locked`); none are needed to run the app. Close any running copy from `target/release` before rebuilding.
 
 When changing dependencies, run `./scripts/generate-notices.ps1` before building a release. The script includes runtime and build dependencies for Windows and deduplicates identical license texts. Notices are committed so ordinary source builds do not require PowerShell.
 
-For native screenshots, build with `--features gui-preview --bin steamcounter-gui` and set `STEAMCOUNTER_SCREENSHOT_TO` to a PNG path. The app exits after capture and waits for `--game` results and layout first. `--compact`, `--preview-range 1y`, `--preview-month YYYY-MM`, `--preview-year YYYY`, `--preview-settings` and `--preview-licenses gpl` (or `third-party`) are development preview options.
+For native screenshots, build with `--features gui-preview --bin steamcounter-gui` and set `STEAMCOUNTER_SCREENSHOT_TO` to a PNG path. The app exits after capture and waits for `--game` results and layout first. `--compact`, `--preview-query name`, `--preview-range 1y`, `--preview-month YYYY-MM`, `--preview-year YYYY`, `--preview-settings` and `--preview-licenses gpl` (or `third-party`) are development preview options.
 
 ## License and source code
 

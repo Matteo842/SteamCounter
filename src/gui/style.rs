@@ -91,6 +91,16 @@ pub fn brand(ui: &Ui, top_left: Pos2, size: f32) {
     );
 }
 
+pub fn centered_brand(ui: &Ui, center: Pos2, size: f32) -> Rect {
+    let text =
+        ui.painter()
+            .layout_no_wrap("STEAMCOUNTER".to_owned(), FontId::proportional(size), SOFT);
+    let width = 34.0 + text.size().x;
+    let rect = Rect::from_center_size(center, vec2(width, 24.0));
+    brand(ui, rect.min, size);
+    rect
+}
+
 pub fn month_name(date: NaiveDate) -> String {
     const MONTHS: [&str; 12] = [
         "January",

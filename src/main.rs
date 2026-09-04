@@ -22,7 +22,7 @@ use steamcounter::{Game, GameQuery, NameMatch, PlayerSnapshot, SteamClient, matc
 #[derive(Parser)]
 #[command(
     name = "steamcounter",
-    version,
+    version = steamcounter::DISPLAY_VERSION,
     about = "Show current Steam player counts. No API key required.",
     after_help = "Examples:\n  steamcounter 730\n  steamcounter elden ring --stats\n  steamcounter 730 --month 2026-08 --year 2025\n  steamcounter \"Counter-Strike 2\" --stats --json\n  steamcounter --search portal\n\nUse the game's AppID, not a user's SteamID."
 )]

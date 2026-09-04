@@ -41,7 +41,7 @@ License text 10 : LICENSE-MIT
 ========================================
 anstream 1.0.0
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-cli/anstyle.git
 Source: https://crates.io/api/v1/crates/anstream/1.0.0/download
 License text 11 : LICENSE-APACHE
@@ -50,7 +50,7 @@ License text 12 : LICENSE-MIT
 ========================================
 anstyle 1.0.14
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-cli/anstyle.git
 Source: https://crates.io/api/v1/crates/anstyle/1.0.14/download
 License text 11 : LICENSE-APACHE
@@ -59,7 +59,7 @@ License text 12 : LICENSE-MIT
 ========================================
 anstyle-parse 1.0.0
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-cli/anstyle.git
 Source: https://crates.io/api/v1/crates/anstyle-parse/1.0.0/download
 License text 11 : LICENSE-APACHE
@@ -68,7 +68,7 @@ License text 12 : LICENSE-MIT
 ========================================
 anstyle-query 1.1.5
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-cli/anstyle.git
 Source: https://crates.io/api/v1/crates/anstyle-query/1.1.5/download
 License text 11 : LICENSE-APACHE
@@ -77,7 +77,7 @@ License text 12 : LICENSE-MIT
 ========================================
 anstyle-wincon 3.0.11
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-cli/anstyle.git
 Source: https://crates.io/api/v1/crates/anstyle-wincon/3.0.11/download
 License text 11 : LICENSE-APACHE
@@ -95,7 +95,7 @@ License text 8 : LICENSE-MIT
 ========================================
 arboard 3.6.1
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/1Password/arboard
 Source: https://crates.io/api/v1/crates/arboard/3.6.1/download
 License text 5 : LICENSE-APACHE.txt
@@ -171,7 +171,7 @@ License text 24 : UNLICENSE
 ========================================
 byteorder-lite 0.1.0
 License: Unlicense OR MIT
-Authors: 
+Authors:
 Repository: https://github.com/image-rs/byteorder-lite
 Source: https://crates.io/api/v1/crates/byteorder-lite/0.1.0/download
 License text 23 : LICENSE-MIT
@@ -188,7 +188,7 @@ License text 25 : LICENSE
 ========================================
 cc 1.4.4
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/cc-rs
 Source: https://crates.io/api/v1/crates/cc/1.4.4/download
 License text 9 : LICENSE-APACHE
@@ -215,7 +215,7 @@ License text 26 : LICENSE-MIT
 ========================================
 chrono 0.4.45
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/chronotope/chrono
 Source: https://crates.io/api/v1/crates/chrono/0.4.45/download
 License text 29 : LICENSE.txt
@@ -223,7 +223,7 @@ License text 29 : LICENSE.txt
 ========================================
 clap 4.6.6
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/clap-rs/clap
 Source: https://crates.io/api/v1/crates/clap/4.6.6/download
 License text 11 : LICENSE-APACHE
@@ -232,7 +232,7 @@ License text 12 : LICENSE-MIT
 ========================================
 clap_builder 4.6.6
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/clap-rs/clap
 Source: https://crates.io/api/v1/crates/clap_builder/4.6.6/download
 License text 11 : LICENSE-APACHE
@@ -241,7 +241,7 @@ License text 12 : LICENSE-MIT
 ========================================
 clap_derive 4.6.4
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/clap-rs/clap
 Source: https://crates.io/api/v1/crates/clap_derive/4.6.4/download
 License text 11 : LICENSE-APACHE
@@ -250,7 +250,7 @@ License text 12 : LICENSE-MIT
 ========================================
 clap_lex 1.1.0
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/clap-rs/clap
 Source: https://crates.io/api/v1/crates/clap_lex/1.1.0/download
 License text 11 : LICENSE-APACHE
@@ -267,7 +267,7 @@ License text: 3 (Boost Software License 1.0)
 ========================================
 colorchoice 1.0.5
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-cli/anstyle.git
 Source: https://crates.io/api/v1/crates/colorchoice/1.0.5/download
 License text 11 : LICENSE-APACHE
@@ -345,7 +345,7 @@ License text 36 : LICENSE-MIT
 ========================================
 dpi 0.1.2
 License: Apache-2.0 AND MIT
-Authors: 
+Authors:
 Repository: https://github.com/rust-windowing/winit
 Source: https://crates.io/api/v1/crates/dpi/0.1.2/download
 License text 11 : LICENSE
@@ -464,7 +464,7 @@ License text 44 : LICENSE-MIT
 ========================================
 find-msvc-tools 0.1.11
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/cc-rs
 Source: https://crates.io/api/v1/crates/find-msvc-tools/0.1.11/download
 License text 9 : LICENSE-APACHE
@@ -500,7 +500,7 @@ License text 47 : LICENSE-MIT
 ========================================
 futures-channel 0.3.34
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/futures-rs
 Source: https://crates.io/api/v1/crates/futures-channel/0.3.34/download
 License text 48 : LICENSE-APACHE
@@ -509,7 +509,7 @@ License text 49 : LICENSE-MIT
 ========================================
 futures-core 0.3.34
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/futures-rs
 Source: https://crates.io/api/v1/crates/futures-core/0.3.34/download
 License text 48 : LICENSE-APACHE
@@ -518,7 +518,7 @@ License text 49 : LICENSE-MIT
 ========================================
 futures-io 0.3.34
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/futures-rs
 Source: https://crates.io/api/v1/crates/futures-io/0.3.34/download
 License text 48 : LICENSE-APACHE
@@ -527,7 +527,7 @@ License text 49 : LICENSE-MIT
 ========================================
 futures-sink 0.3.34
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/futures-rs
 Source: https://crates.io/api/v1/crates/futures-sink/0.3.34/download
 License text 48 : LICENSE-APACHE
@@ -536,7 +536,7 @@ License text 49 : LICENSE-MIT
 ========================================
 futures-task 0.3.34
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/futures-rs
 Source: https://crates.io/api/v1/crates/futures-task/0.3.34/download
 License text 48 : LICENSE-APACHE
@@ -545,7 +545,7 @@ License text 49 : LICENSE-MIT
 ========================================
 futures-util 0.3.34
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/futures-rs
 Source: https://crates.io/api/v1/crates/futures-util/0.3.34/download
 License text 48 : LICENSE-APACHE
@@ -624,7 +624,7 @@ License text 54 : LICENSE
 ========================================
 heck 0.5.0
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/withoutboats/heck
 Source: https://crates.io/api/v1/crates/heck/0.5.0/download
 License text 9 : LICENSE-APACHE
@@ -684,7 +684,7 @@ License text 61 : LICENSE
 ========================================
 hyper-rustls 0.27.9
 License: Apache-2.0 OR ISC OR MIT
-Authors: 
+Authors:
 Repository: https://github.com/rustls/hyper-rustls
 Source: https://crates.io/api/v1/crates/hyper-rustls/0.27.9/download
 License text 9 : LICENSE-APACHE
@@ -794,7 +794,7 @@ License text 69 : LICENSE-MIT
 ========================================
 is_terminal_polyfill 1.70.2
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/polyfill-rs/is_terminal_polyfill
 Source: https://crates.io/api/v1/crates/is_terminal_polyfill/1.70.2/download
 License text 11 : LICENSE-APACHE
@@ -821,7 +821,7 @@ License text: 2 (Apache 2.0; selected where dual-licensed)
 ========================================
 libc 0.2.189
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rust-lang/libc
 Source: https://crates.io/api/v1/crates/libc/0.2.189/download
 License text 13 : LICENSE-APACHE
@@ -990,7 +990,7 @@ License text 8 : LICENSE-MIT
 ========================================
 once_cell_polyfill 1.70.2
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/polyfill-rs/once_cell_polyfill
 Source: https://crates.io/api/v1/crates/once_cell_polyfill/1.70.2/download
 License text 11 : LICENSE-APACHE
@@ -1074,7 +1074,7 @@ License text 84 : LICENSE
 ========================================
 pin-project-lite 0.2.17
 License: Apache-2.0 OR MIT
-Authors: 
+Authors:
 Repository: https://github.com/taiki-e/pin-project-lite
 Source: https://crates.io/api/v1/crates/pin-project-lite/0.2.17/download
 License text 5 : LICENSE-APACHE
@@ -1172,7 +1172,7 @@ License text 93 : LICENSE-MIT
 ========================================
 ring 0.17.14
 License: Apache-2.0 AND ISC
-Authors: 
+Authors:
 Repository: https://github.com/briansmith/ring
 Source: https://crates.io/api/v1/crates/ring/0.17.14/download
 License text 94 : LICENSE
@@ -1185,7 +1185,7 @@ License text 98 : third_party\fiat\LICENSE
 ========================================
 rustc_version 0.4.1
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/djc/rustc-version-rs
 Source: https://crates.io/api/v1/crates/rustc_version/0.4.1/download
 License text 9 : LICENSE-APACHE
@@ -1194,7 +1194,7 @@ License text 73 : LICENSE-MIT
 ========================================
 rustls 0.23.43
 License: Apache-2.0 OR ISC OR MIT
-Authors: 
+Authors:
 Repository: https://github.com/rustls/rustls
 Source: https://crates.io/api/v1/crates/rustls/0.23.43/download
 License text 9 : LICENSE-APACHE
@@ -1204,7 +1204,7 @@ License text 63 : LICENSE-MIT
 ========================================
 rustls-native-certs 0.8.4
 License: Apache-2.0 OR ISC OR MIT
-Authors: 
+Authors:
 Repository: https://github.com/rustls/rustls-native-certs
 Source: https://crates.io/api/v1/crates/rustls-native-certs/0.8.4/download
 License text 99 : LICENSE
@@ -1215,7 +1215,7 @@ License text 63 : LICENSE-MIT
 ========================================
 rustls-pki-types 1.15.1
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rustls/pki-types
 Source: https://crates.io/api/v1/crates/rustls-pki-types/1.15.1/download
 License text 100 : LICENSE-APACHE
@@ -1224,7 +1224,7 @@ License text 101 : LICENSE-MIT
 ========================================
 rustls-webpki 0.103.15
 License: ISC
-Authors: 
+Authors:
 Repository: https://github.com/rustls/webpki
 Source: https://crates.io/api/v1/crates/rustls-webpki/0.103.15/download
 License text 102 : LICENSE
@@ -1508,7 +1508,7 @@ License text 119 : LICENSE
 ========================================
 tokio-rustls 0.26.4
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/rustls/tokio-rustls
 Source: https://crates.io/api/v1/crates/tokio-rustls/0.26.4/download
 License text 120 : LICENSE-APACHE
@@ -1673,7 +1673,7 @@ License text 56 : LICENSE-MIT
 ========================================
 web-time 1.1.0
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/daxpedda/web-time
 Source: https://crates.io/api/v1/crates/web-time/1.1.0/download
 License text 134 : LICENSE-APACHE
@@ -1709,7 +1709,7 @@ License text 140 : license-mit
 ========================================
 windows-link 0.2.1
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/microsoft/windows-rs
 Source: https://crates.io/api/v1/crates/windows-link/0.2.1/download
 License text 139 : license-apache-2.0
@@ -1727,7 +1727,7 @@ License text 140 : license-mit
 ========================================
 windows-sys 0.61.2
 License: MIT OR Apache-2.0
-Authors: 
+Authors:
 Repository: https://github.com/microsoft/windows-rs
 Source: https://crates.io/api/v1/crates/windows-sys/0.61.2/download
 License text 139 : license-apache-2.0
@@ -1785,7 +1785,7 @@ License text 65 : LICENSE
 ========================================
 zerocopy 0.8.56
 License: BSD-2-Clause OR Apache-2.0 OR MIT
-Authors: 
+Authors:
 Repository: https://github.com/google/zerocopy
 Source: https://crates.io/api/v1/crates/zerocopy/0.8.56/download
 License text 142 : LICENSE-APACHE
@@ -1848,6 +1848,26 @@ Authors: David Tolnay <dtolnay@gmail.com>
 Repository: https://github.com/dtolnay/zmij
 Source: https://crates.io/api/v1/crates/zmij/1.0.23/download
 License text 8 : LICENSE-MIT
+
+========================================
+zune-core 0.5.3
+License: MIT OR Apache-2.0 OR Zlib
+Authors:
+Repository: https://github.com/etemesi254/zune-image
+Source: https://crates.io/api/v1/crates/zune-core/0.5.3/download
+License text 82 : LICENSE-APACHE
+License text 146 : LICENSE-MIT
+License text 147 : LICENSE-ZLIB
+
+========================================
+zune-jpeg 0.5.15
+License: MIT OR Apache-2.0 OR Zlib
+Authors: caleb <etemesicaleb@gmail.com>
+Repository: https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg
+Source: https://crates.io/api/v1/crates/zune-jpeg/0.5.15/download
+License text 82 : LICENSE-APACHE
+License text 146 : LICENSE-MIT
+License text 147 : LICENSE-ZLIB
 
 ========================================
 LICENSE TEXT 1
@@ -10959,3 +10979,51 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+========================================
+LICENSE TEXT 146
+========================================
+MIT License
+
+Copyright (c) zune-image developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================
+LICENSE TEXT 147
+========================================
+zlib License
+
+(C) zune-image developers
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.

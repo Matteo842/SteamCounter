@@ -49,7 +49,9 @@ try {
     foreach ($package in $packages) {
         $crateRoot = Split-Path -Parent $package.manifest_path
         $url = "https://crates.io/api/v1/crates/$($package.name)/$($package.version)/download"
-        [void]$notices.AppendLine("`n========================================`n$($package.name) $($package.version)`nLicense: $($package.license)`nAuthors: $($package.authors -join ', ')`nRepository: $($package.repository)`nSource: $url")
+        $authors = $package.authors -join ', '
+        $authorsLine = if ($authors) { "Authors: $authors" } else { 'Authors:' }
+        [void]$notices.AppendLine("`n========================================`n$($package.name) $($package.version)`nLicense: $($package.license)`n$authorsLine`nRepository: $($package.repository)`nSource: $url")
         [void]$sources.AppendLine("| $($package.name) $($package.version) | $($package.license) | [Download]($url) |")
         $files = @(rg --files --hidden $crateRoot --iglob '*license*' --iglob '*licence*' --iglob '*copying*' --iglob '*notice*' --iglob 'OFL.txt' --iglob 'UFL.txt' --iglob 'Hack-Regular.txt' | Sort-Object)
         if ($files.Count -eq 0) {

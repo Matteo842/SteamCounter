@@ -217,3 +217,5 @@ MPL-2.0 archives are also mirrored in this repository's sources/ folder and addi
 | zerovec 0.11.8 | Unicode-3.0 | [Download](https://crates.io/api/v1/crates/zerovec/0.11.8/download) |
 | zerovec-derive 0.11.6 | Unicode-3.0 | [Download](https://crates.io/api/v1/crates/zerovec-derive/0.11.6/download) |
 | zmij 1.0.23 | MIT | [Download](https://crates.io/api/v1/crates/zmij/1.0.23/download) |
+| zune-core 0.5.3 | MIT OR Apache-2.0 OR Zlib | [Download](https://crates.io/api/v1/crates/zune-core/0.5.3/download) |
+| zune-jpeg 0.5.15 | MIT OR Apache-2.0 OR Zlib | [Download](https://crates.io/api/v1/crates/zune-jpeg/0.5.15/download) |

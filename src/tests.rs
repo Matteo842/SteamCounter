@@ -136,6 +136,36 @@ fn appid_lookup_adds_store_name() {
     server.join().unwrap();
 }
 
+#[cfg(feature = "gui")]
+#[test]
+fn store_metadata_distinguishes_games_from_dlc() {
+    let (client, server) = fixture(vec![
+        (
+            "/details?appids=1085660&filters=basic&l=english&cc=IT",
+            200,
+            r#"{"1085660":{"success":true,"data":{"type":"game","name":"Destiny 2"}}}"#,
+        ),
+        (
+            "/details?appids=2336880&filters=basic&l=english&cc=IT",
+            200,
+            r#"{"2336880":{"success":true,"data":{"type":"dlc","name":"Destiny 2: The Final Shape"}}}"#,
+        ),
+    ]);
+    assert_eq!(
+        client
+            .is_standalone(NonZeroU32::new(1085660).unwrap())
+            .unwrap(),
+        Some(true)
+    );
+    assert_eq!(
+        client
+            .is_standalone(NonZeroU32::new(2336880).unwrap())
+            .unwrap(),
+        Some(false)
+    );
+    server.join().unwrap();
+}
+
 #[test]
 fn zero_players_is_valid_even_when_store_is_down() {
     let (client, server) = fixture(vec![

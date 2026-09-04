@@ -8,6 +8,10 @@ pub mod cache;
 pub mod history;
 pub mod series;
 
+/// Public release label. Cargo keeps a three-part SemVer internally, while
+/// SteamCounter uses compact release names such as 1.1 and 1.1b.
+pub const DISPLAY_VERSION: &str = "1.1";
+
 #[cfg(feature = "gui")]
 pub mod gui;
 
@@ -177,6 +181,13 @@ impl SteamClient {
     }
 
     fn app_name(&self, appid: NonZeroU32) -> Result<Option<String>> {
+        Ok(self
+            .app_details(appid)?
+            .map(|data| data.name)
+            .filter(|name| !name.trim().is_empty()))
+    }
+
+    fn app_details(&self, appid: NonZeroU32) -> Result<Option<AppData>> {
         let key = appid.to_string();
         let mut response: HashMap<String, AppDetails> = self.get_json(
             &self.details_url,
@@ -191,9 +202,51 @@ impl SteamClient {
         Ok(response
             .remove(&key)
             .filter(|details| details.success)
-            .and_then(|details| details.data)
-            .map(|data| data.name)
-            .filter(|name| !name.trim().is_empty()))
+            .and_then(|details| details.data))
+    }
+
+    #[cfg(feature = "gui")]
+    pub(crate) fn header_image(&self, appid: NonZeroU32) -> Result<Option<Vec<u8>>> {
+        const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+
+        let Some(url) = self
+            .app_details(appid)?
+            .and_then(|data| data.header_image)
+            .filter(|url| !url.trim().is_empty())
+        else {
+            return Ok(None);
+        };
+        let response = self
+            .http
+            .get(url)
+            .timeout(self.timeout.min(Duration::from_secs(8)))
+            .send()
+            .map_err(|error| anyhow::Error::new(error.without_url()))
+            .context("Could not download the Steam game banner")?;
+        if response
+            .content_length()
+            .is_some_and(|size| size > MAX_IMAGE_BYTES)
+        {
+            bail!("Steam returned an unexpectedly large game banner.");
+        }
+        let response = response
+            .error_for_status()
+            .map_err(|error| anyhow::Error::new(error.without_url()))
+            .context("Steam returned an HTTP error for the game banner")?;
+        let bytes = response
+            .bytes()
+            .context("Could not read the Steam game banner")?;
+        if bytes.len() as u64 > MAX_IMAGE_BYTES {
+            bail!("Steam returned an unexpectedly large game banner.");
+        }
+        Ok(Some(bytes.to_vec()))
+    }
+
+    #[cfg(feature = "gui")]
+    pub(crate) fn is_standalone(&self, appid: NonZeroU32) -> Result<Option<bool>> {
+        Ok(self
+            .app_details(appid)?
+            .map(|data| data.kind.as_deref() == Some("game")))
     }
 
     fn get_json<T: DeserializeOwned>(
@@ -263,7 +316,10 @@ struct AppDetails {
 
 #[derive(Deserialize)]
 struct AppData {
+    #[serde(rename = "type")]
+    kind: Option<String>,
     name: String,
+    header_image: Option<String>,
 }
 
 #[cfg(test)]
