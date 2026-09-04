@@ -277,11 +277,7 @@ impl SteamCounterApp {
     }
 
     fn search_field(&mut self, ui: &mut Ui, rect: Rect, large: bool) -> bool {
-        let button_width = if large { 94.0 } else { 76.0 };
-        let edit_rect = Rect::from_min_max(
-            rect.min,
-            pos2(rect.right() - button_width - 8.0, rect.bottom()),
-        );
+        let edit_rect = rect;
         ui.painter()
             .rect(edit_rect, 7.0, INPUT, Stroke::new(1.0, BORDER));
         let icon_center = pos2(edit_rect.left() + 23.0, edit_rect.center().y - 1.0);
@@ -293,7 +289,7 @@ impl SteamCounterApp {
         );
         let inner = Rect::from_min_max(
             pos2(edit_rect.left() + 43.0, edit_rect.top()),
-            pos2(edit_rect.right() - 12.0, edit_rect.bottom()),
+            pos2(edit_rect.right() - 43.0, edit_rect.bottom()),
         );
         let response = ui.put(
             inner,
@@ -319,31 +315,46 @@ impl SteamCounterApp {
             ui.painter()
                 .rect_stroke(edit_rect, 7.0, Stroke::new(1.0, ACCENT));
         }
+        let enter_center = pos2(edit_rect.right() - 22.0, edit_rect.center().y);
+        let enter_color = Color32::from_rgba_unmultiplied(MUTED.r(), MUTED.g(), MUTED.b(), 140);
+        let enter_stroke = Stroke::new(if large { 1.8 } else { 1.5 }, enter_color);
+        ui.painter().line_segment(
+            [
+                enter_center + vec2(5.0, -6.0),
+                enter_center + vec2(5.0, 1.0),
+            ],
+            enter_stroke,
+        );
+        ui.painter().line_segment(
+            [
+                enter_center + vec2(-5.0, 1.0),
+                enter_center + vec2(5.0, 1.0),
+            ],
+            enter_stroke,
+        );
+        ui.painter().line_segment(
+            [
+                enter_center + vec2(-5.0, 1.0),
+                enter_center + vec2(-1.0, -3.0),
+            ],
+            enter_stroke,
+        );
+        ui.painter().line_segment(
+            [
+                enter_center + vec2(-5.0, 1.0),
+                enter_center + vec2(-1.0, 5.0),
+            ],
+            enter_stroke,
+        );
         let enter = response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
-        let button_rect =
-            Rect::from_min_max(pos2(rect.right() - button_width, rect.top()), rect.max);
-        let clicked = ui
-            .put(
-                button_rect,
-                egui::Button::new(
-                    RichText::new("Search")
-                        .size(if large { 16.0 } else { 14.0 })
-                        .strong()
-                        .color(WHITE),
-                )
-                .fill(BLUE)
-                .stroke(Stroke::NONE)
-                .rounding(7.0),
-            )
-            .clicked();
-        (clicked || enter) && !self.query.trim().is_empty()
+        enter && !self.query.trim().is_empty()
     }
 
     fn welcome(&mut self, ui: &mut Ui, rect: Rect, ctx: &Context) {
         brand(ui, rect.left_top(), 18.0);
         self.settings_button(
             ui,
-            Rect::from_min_size(pos2(rect.right() - 80.0, rect.top()), vec2(80.0, 32.0)),
+            Rect::from_min_size(pos2(rect.right() - 32.0, rect.top()), vec2(32.0, 32.0)),
         );
         let content_width = 600.0_f32.min(rect.width() - 60.0);
         let center = rect.center() - vec2(0.0, 12.0);
@@ -446,12 +457,12 @@ impl SteamCounterApp {
         self.settings_button(
             ui,
             Rect::from_min_size(
-                pos2(rect.right() - 80.0, rect.top() + 16.0),
-                vec2(80.0, 34.0),
+                pos2(rect.right() - 34.0, rect.top() + 16.0),
+                vec2(34.0, 34.0),
             ),
         );
         let search = Rect::from_min_size(
-            pos2(rect.right() - 94.0 - search_width, rect.top() + 12.0),
+            pos2(rect.right() - 48.0 - search_width, rect.top() + 12.0),
             vec2(search_width, 42.0),
         );
         if self.search_field(ui, search, false) {
@@ -688,13 +699,28 @@ impl SteamCounterApp {
     }
 
     fn settings_button(&mut self, ui: &mut Ui, rect: Rect) {
-        if ui
+        let response = ui
             .put(
                 rect,
-                egui::Button::new(RichText::new("Settings").size(12.0).color(SOFT)).fill(PANEL),
+                egui::Button::new("")
+                    .fill(PANEL)
+                    .stroke(Stroke::new(1.0, BORDER))
+                    .rounding(7.0),
             )
-            .clicked()
-        {
+            .on_hover_text("Settings");
+        let icon_color = if response.hovered() { WHITE } else { SOFT };
+        let center = rect.center();
+        ui.painter()
+            .circle_stroke(center, 5.0, Stroke::new(2.0, icon_color));
+        for step in 0..8 {
+            let angle = step as f32 * std::f32::consts::TAU / 8.0;
+            let direction = vec2(angle.cos(), angle.sin());
+            ui.painter().line_segment(
+                [center + direction * 7.0, center + direction * 9.0],
+                Stroke::new(2.4, icon_color),
+            );
+        }
+        if response.clicked() {
             self.settings_open = !self.settings_open;
             self.cache_size = HistoryCache::new(true)
                 .and_then(|cache| cache.size_bytes())
